@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2026 neroued
+
+[build-system]
+requires = ["scikit-build-core>=0.12", "nanobind>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "neroued-3mf"
+version = "0.1.0"
+description = "Lightweight Python bindings for writing 3MF files"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "neroued" }]
+keywords = ["3mf", "3d-printing", "mesh", "cad"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: C++",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/neroued/neroued_3mf"
+Repository = "https://github.com/neroued/neroued_3mf"
+
+[tool.scikit-build]
+cmake.source-dir = "python"
+cmake.build-type = "Release"
+wheel.packages = ["python/neroued_3mf"]
+
+[tool.scikit-build.cmake.define]
+N3MF_BUILD_TESTS = "OFF"

@@ -103,7 +103,7 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 | Function | Description |
 |----------|-------------|
 | `WriteToBuffer(doc, opts)` | Serialize to `std::vector<uint8_t>` |
-| `WriteToFile(path, doc, opts)` | Atomic write to file (temp file + rename) |
+| `WriteToFile(path, doc, opts)` | Atomic write to file (temp file + rename). `path` is `std::filesystem::path` |
 | `WriteToStream(out, doc, opts)` | Write to `std::ostream` |
 
 ### WriteOptions

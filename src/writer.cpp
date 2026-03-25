@@ -171,12 +171,11 @@ std::vector<uint8_t> WriteToBuffer(const Document &doc, const WriteOptions &opts
     return zip_bytes;
 }
 
-void WriteToFile(const std::string &path, const Document &doc, const WriteOptions &opts) {
+void WriteToFile(const std::filesystem::path &path, const Document &doc, const WriteOptions &opts) {
     if (path.empty()) { throw InputError("3MF output path is empty"); }
     ValidateDocumentPreWrite(doc);
 
-    auto final_path = std::filesystem::path(path);
-    auto dir = final_path.parent_path();
+    auto dir = path.parent_path();
     if (!dir.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
@@ -186,12 +185,12 @@ void WriteToFile(const std::string &path, const Document &doc, const WriteOption
         }
     }
 
-    PendingAtomicFile pending(MakeAtomicTempPath(final_path));
+    PendingAtomicFile pending(MakeAtomicTempPath(path));
     {
-        detail::StreamingZipWriter zip(pending.path().string(), opts);
+        detail::StreamingZipWriter zip(pending.path(), opts);
         WriteAllEntries(zip, doc, opts);
     }
-    pending.CommitTo(final_path);
+    pending.CommitTo(path);
 }
 
 void WriteToStream(std::ostream &out, const Document &doc, const WriteOptions &opts) {

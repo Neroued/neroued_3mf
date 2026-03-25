@@ -227,10 +227,12 @@ struct StreamingZipWriter::Impl {
         dos_date = d;
     }
 
-    Impl(const std::string &path, WriteOptions opts)
+    Impl(const std::filesystem::path &path, WriteOptions opts)
         : sink_kind(SinkKind::File), file_sink(path, std::ios::binary | std::ios::trunc),
           options(std::move(opts)) {
-        if (!file_sink.is_open()) { throw IOError("Cannot open file for writing: " + path); }
+        if (!file_sink.is_open()) {
+            throw IOError("Cannot open file for writing: " + path.string());
+        }
         auto [t, d] = MakeDosTimestamp(options.deterministic);
         dos_time = t;
         dos_date = d;
@@ -457,7 +459,8 @@ struct StreamingZipWriter::Impl {
 StreamingZipWriter::StreamingZipWriter(std::vector<uint8_t> &output, const WriteOptions &options)
     : impl_(std::make_unique<Impl>(output, options)) {}
 
-StreamingZipWriter::StreamingZipWriter(const std::string &file_path, const WriteOptions &options)
+StreamingZipWriter::StreamingZipWriter(const std::filesystem::path &file_path,
+                                       const WriteOptions &options)
     : impl_(std::make_unique<Impl>(file_path, options)) {}
 
 StreamingZipWriter::StreamingZipWriter(std::ostream &output, const WriteOptions &options)

@@ -9,8 +9,35 @@ Lightweight C++20 library for writing [3MF](https://3mf.io/specification/) files
 - **Vendor-neutral extensions** — inject arbitrary files, OPC relationships, and metadata without library changes
 - **Production Extension** — assembly models, external object files, merged mode, `p:UUID`
 - **No runtime dependencies** — C++20 standard library only (zlib optional for deflate compression)
+- **Python bindings** — `pip install neroued-3mf`, supports Python 3.10+ on all platforms
 
 ## Quick Start
+
+### Python
+
+```python
+import neroued_3mf as n3mf
+
+mesh = n3mf.Mesh()
+mesh.vertices = [n3mf.Vec3f(0, 0, 0), n3mf.Vec3f(10, 0, 0), n3mf.Vec3f(5, 10, 5)]
+mesh.triangles = [n3mf.IndexTriangle(0, 1, 2)]
+
+builder = n3mf.DocumentBuilder()
+builder.set_unit(n3mf.Unit.Millimeter)
+
+mat = builder.add_base_material_group([
+    n3mf.BaseMaterial("Red", n3mf.Color(255, 0, 0, 255)),
+    n3mf.BaseMaterial("Blue", n3mf.Color(0, 0, 255, 255)),
+])
+
+obj = builder.add_mesh_object("Part1", mesh, mat, 0)
+builder.add_build_item(obj)
+
+doc = builder.build()
+n3mf.write_to_file("output.3mf", doc)
+```
+
+### C++
 
 ```cpp
 #include <neroued/3mf/neroued_3mf.h>
@@ -36,6 +63,14 @@ neroued_3mf::WriteToFile("output.3mf", doc);
 ```
 
 ## Installation
+
+### Python
+
+```bash
+pip install neroued-3mf
+```
+
+### C++ (CMake FetchContent)
 
 ```cmake
 include(FetchContent)

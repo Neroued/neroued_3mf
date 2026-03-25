@@ -139,7 +139,7 @@ TEST(Writer, WriteToFileAndReadBack) {
     auto doc = MakeSingleTriangleDocument();
     auto tmp_path = std::filesystem::temp_directory_path() / "neroued_3mf_test.3mf";
 
-    n3mf::WriteToFile(tmp_path.string(), doc);
+    n3mf::WriteToFile(tmp_path, doc);
 
     std::ifstream in(tmp_path, std::ios::binary);
     ASSERT_TRUE(in.is_open());

@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <span>
@@ -18,7 +19,7 @@ namespace neroued_3mf::detail {
 class StreamingZipWriter {
   public:
     StreamingZipWriter(std::vector<uint8_t> &output, const WriteOptions &options);
-    StreamingZipWriter(const std::string &file_path, const WriteOptions &options);
+    StreamingZipWriter(const std::filesystem::path &file_path, const WriteOptions &options);
     StreamingZipWriter(std::ostream &output, const WriteOptions &options);
     ~StreamingZipWriter();
 

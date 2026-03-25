@@ -34,6 +34,12 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 - `src/`：库实现（builder、writer、opc、zip）
 - `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate）
 - `tests/`：单元测试（GoogleTest）
+- `python/`：Python 绑定（nanobind + scikit-build-core）
+  - `python/src/bind.cpp`：nanobind 绑定源码
+  - `python/neroued_3mf/`：Python 包（`__init__.py`、`py.typed`）
+  - `python/tests/`：Python 测试（pytest）
+  - `python/CMakeLists.txt`：Python 扩展模块构建
+- `pyproject.toml`：Python 包配置（scikit-build-core 构建后端）
 - `cmake/`：CMake 配置模板（find_package 支持）
 - `docs/`：项目文档（设计、API 参考、构建指南、示例）
 
@@ -58,6 +64,9 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 更新构建/集成文档 | `docs/BUILDING.md` |
 | 更新用法示例文档 | `docs/EXAMPLES.md` |
 | 更新设计文档 | `docs/DESIGN.md` |
+| 修改 Python 绑定 | `python/src/bind.cpp`、`python/CMakeLists.txt`、`pyproject.toml` |
+| 新增 Python 绑定类型 | `python/src/bind.cpp`（添加绑定）、`python/neroued_3mf/__init__.py`（重导出） |
+| 修改 Python 测试 | `python/tests/test_basic.py` |
 
 ## 核心类型与 API
 

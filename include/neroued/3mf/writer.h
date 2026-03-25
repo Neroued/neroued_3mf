@@ -10,8 +10,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
-#include <string>
 #include <vector>
 
 namespace neroued_3mf {
@@ -30,7 +30,8 @@ struct WriteOptions {
 std::vector<uint8_t> WriteToBuffer(const Document &doc, const WriteOptions &opts = {});
 
 /// Write a Document directly to a file (atomic write via temp file + rename).
-void WriteToFile(const std::string &path, const Document &doc, const WriteOptions &opts = {});
+void WriteToFile(const std::filesystem::path &path, const Document &doc,
+                 const WriteOptions &opts = {});
 
 /// Write a Document to an arbitrary output stream.
 void WriteToStream(std::ostream &out, const Document &doc, const WriteOptions &opts = {});
