@@ -1,0 +1,15 @@
+---
+description: 文档同步规范
+globs: "**/*"
+alwaysApply: true
+---
+
+# 文档同步
+
+当修改涉及以下内容时，检查 `docs/DESIGN.md`、`README.md` 和 `AGENTS.md` 是否需要同步更新：
+
+- 公共 API 变更（头文件增删、函数签名变化）
+- Document 模型变更（字段增删、校验规则变化）
+- 配置参数增删（WriteOptions 等）
+- 构建选项变化（CMake 选项、依赖变化）
+- 仓库结构变化（新增/删除/重命名文件或目录）

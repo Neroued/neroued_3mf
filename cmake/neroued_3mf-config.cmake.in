@@ -1,0 +1,4 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/neroued_3mf-targets.cmake")
+check_required_components(neroued_3mf)

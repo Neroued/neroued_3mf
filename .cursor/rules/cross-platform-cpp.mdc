@@ -1,0 +1,27 @@
+---
+description: C++ 跨平台编译规范
+globs: "**/*.cpp,**/*.h,**/*.hpp,**/CMakeLists.txt,**/*.cmake"
+alwaysApply: false
+---
+
+# C++ 跨平台编译规范
+
+## 文件系统路径
+
+禁止硬编码 POSIX 路径，一律使用 `std::filesystem`（C++17）。
+
+## 随机数 / ID 生成
+
+禁止直接读取 `/dev/urandom`，使用 `std::random_device`。
+
+## CMake 外部库链接
+
+禁止硬编码 Linux 特有的库名，使用 find_package 或条件分支。
+
+## 平台宏判断
+
+需要平台差异时，使用标准宏：`_WIN32`、`__APPLE__`。
+
+## 变更检查
+
+每次新增系统调用或文件操作时，必须确认跨平台兼容性。

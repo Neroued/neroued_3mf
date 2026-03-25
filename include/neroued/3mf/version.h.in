@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2026 neroued
+
+#pragma once
+
+// clang-format off
+#define NEROUED_3MF_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define NEROUED_3MF_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define NEROUED_3MF_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define NEROUED_3MF_VERSION_STRING "@PROJECT_VERSION@"
+// clang-format on

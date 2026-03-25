@@ -1,0 +1,30 @@
+# Build
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+compile_commands.json
+
+# IDE
+.cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.3mf
+*.log
