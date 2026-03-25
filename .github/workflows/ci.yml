@@ -211,9 +211,9 @@ jobs:
 
       - name: Install package (macOS)
         if: runner.os == 'macOS'
-        run: pip install --verbose .
-        env:
-          SKBUILD_CMAKE_DEFINE: "OpenMP_ROOT=$(brew --prefix libomp)"
+        run: |
+          export SKBUILD_CMAKE_DEFINE="OpenMP_ROOT=$(brew --prefix libomp)"
+          pip install --verbose .
 
       - name: Install package (Windows)
         if: runner.os == 'Windows'
