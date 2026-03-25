@@ -10,6 +10,13 @@ import pytest
 
 import neroued_3mf as n3mf
 
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -249,3 +256,106 @@ class TestWriteOptions:
         assert opts.compression == n3mf.WriteOptions.Compression.Auto
         assert opts.deterministic is True
         assert opts.compact_xml is False
+
+
+# ---------------------------------------------------------------------------
+# Mesh.from_arrays (numpy)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
+class TestMeshFromArrays:
+    def test_float32_uint32(self):
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+        faces = np.array([[0, 1, 2]], dtype=np.uint32)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+        assert mesh.vertex_count == 3
+        assert mesh.triangle_count == 1
+        assert mesh.vertices[0].x == pytest.approx(0.0)
+        assert mesh.vertices[1].x == pytest.approx(10.0)
+        assert mesh.triangles[0].v1 == 0
+        assert mesh.triangles[0].v2 == 1
+        assert mesh.triangles[0].v3 == 2
+
+    def test_float64_int64(self):
+        """Typical trimesh dtypes (float64 vertices, int64 faces)."""
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float64)
+        faces = np.array([[0, 1, 2]], dtype=np.int64)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+        assert mesh.vertex_count == 3
+        assert mesh.triangle_count == 1
+        assert mesh.vertices[1].x == pytest.approx(10.0)
+        assert mesh.triangles[0].v1 == 0
+
+    def test_int32_triangles(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        faces = np.array([[0, 1, 2]], dtype=np.int32)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+        assert mesh.triangle_count == 1
+
+    def test_empty_arrays(self):
+        verts = np.zeros((0, 3), dtype=np.float32)
+        faces = np.zeros((0, 3), dtype=np.uint32)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+        assert mesh.empty
+
+    def test_wrong_vertex_shape_raises(self):
+        verts = np.array([0, 0, 0, 10, 0, 0], dtype=np.float32)
+        faces = np.array([[0, 1, 2]], dtype=np.uint32)
+        with pytest.raises(n3mf.InputError):
+            n3mf.Mesh.from_arrays(verts, faces)
+
+    def test_wrong_triangle_shape_raises(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        faces = np.array([[0, 1, 2, 3]], dtype=np.uint32)
+        with pytest.raises(n3mf.InputError):
+            n3mf.Mesh.from_arrays(verts, faces)
+
+    def test_negative_index_raises(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        faces = np.array([[-1, 1, 2]], dtype=np.int64)
+        with pytest.raises(n3mf.InputError, match="out of uint32 range"):
+            n3mf.Mesh.from_arrays(verts, faces)
+
+    def test_wrong_vertex_dtype_raises(self):
+        verts = np.array([[0, 0, 0]], dtype=np.int32)
+        faces = np.array([[0, 1, 2]], dtype=np.uint32)
+        with pytest.raises((n3mf.InputError, TypeError)):
+            n3mf.Mesh.from_arrays(verts, faces)
+
+    def test_wrong_triangle_dtype_raises(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        faces = np.array([[0, 1, 2]], dtype=np.float64)
+        with pytest.raises((n3mf.InputError, TypeError)):
+            n3mf.Mesh.from_arrays(verts, faces)
+
+    def test_large_mesh(self):
+        rng = np.random.default_rng(42)
+        nv, nt = 100_000, 200_000
+        verts = rng.random((nv, 3)).astype(np.float64)
+        faces = rng.integers(0, nv, size=(nt, 3)).astype(np.int64)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+        assert mesh.vertex_count == nv
+        assert mesh.triangle_count == nt
+
+    def test_roundtrip_write(self):
+        """Mesh from numpy arrays can be written to a valid 3MF ZIP."""
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float64)
+        faces = np.array([[0, 1, 2]], dtype=np.int64)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+
+        builder = n3mf.DocumentBuilder()
+        builder.set_unit(n3mf.Unit.Millimeter)
+        obj_id = builder.add_mesh_object("Part", mesh)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+        assert len(buf) > 100
+
+    def test_precision_preservation(self):
+        """float64 -> float32 conversion preserves reasonable precision."""
+        verts = np.array([[1.23456789, 2.34567890, 3.45678901]], dtype=np.float64)
+        faces = np.array([[0, 0, 0]], dtype=np.uint32)
+        mesh = n3mf.Mesh.from_arrays(verts, faces)
+        assert mesh.vertices[0].x == pytest.approx(1.23456789, rel=1e-6)
+        assert mesh.vertices[0].y == pytest.approx(2.34567890, rel=1e-6)

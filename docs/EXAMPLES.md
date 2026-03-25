@@ -138,6 +138,34 @@ auto doc = builder.Build();
 neroued_3mf::WriteToFile("bambu_project.3mf", doc);
 ```
 
+## Python: NumPy Array Input
+
+`Mesh.from_arrays()` accepts NumPy arrays directly, avoiding per-element Python object overhead. Accepts float32/float64 vertices and uint32/int32/int64 triangles (C-contiguous).
+
+```python
+import numpy as np
+import neroued_3mf as n3mf
+
+# Typical trimesh workflow
+import trimesh
+tm = trimesh.load("model.stl")
+
+mesh = n3mf.Mesh.from_arrays(
+    vertices=tm.vertices,   # (N, 3) float64 → auto-converted to float32
+    triangles=tm.faces,     # (M, 3) int64   → auto-converted to uint32
+)
+
+builder = n3mf.DocumentBuilder()
+builder.set_unit(n3mf.Unit.Millimeter)
+obj = builder.add_mesh_object("Part", mesh)
+builder.add_build_item(obj)
+
+doc = builder.build()
+n3mf.write_to_file("output.3mf", doc)
+```
+
+For zero-copy with matching dtypes (float32 vertices, uint32 triangles), no conversion is performed — data is memcpy'd directly.
+
 ## Write Options
 
 ### Compression Control
