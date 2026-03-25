@@ -39,8 +39,11 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
   - `python/neroued_3mf/`：Python 包（`__init__.py`、`py.typed`）
   - `python/tests/`：Python 测试（pytest）
   - `python/CMakeLists.txt`：Python 扩展模块构建
-- `pyproject.toml`：Python 包配置（scikit-build-core 构建后端）
+- `pyproject.toml`：Python 包配置（scikit-build-core 构建后端、cibuildwheel、setuptools_scm）
 - `cmake/`：CMake 配置模板（find_package 支持）
+- `.github/workflows/`：CI/CD 流水线
+  - `ci.yml`：持续集成（clang-format、C++ 构建测试、Python 构建测试）
+  - `wheels.yml`：打包发布（cibuildwheel 构建 wheel、sdist、OIDC 发布到 PyPI/TestPyPI）
 - `docs/`：项目文档（设计、API 参考、构建指南、示例）
 
 ## 按任务快速定位
@@ -67,6 +70,10 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 修改 Python 绑定 | `python/src/bind.cpp`、`python/CMakeLists.txt`、`pyproject.toml` |
 | 新增 Python 绑定类型 | `python/src/bind.cpp`（添加绑定）、`python/neroued_3mf/__init__.py`（重导出） |
 | 修改 Python 测试 | `python/tests/test_basic.py` |
+| 修改 CI 流水线 | `.github/workflows/ci.yml`、`.github/workflows/wheels.yml` |
+| 修改 cibuildwheel 配置 | `pyproject.toml`（`[tool.cibuildwheel]` 段） |
+| 修改版本管理 | `pyproject.toml`（`[tool.setuptools_scm]` 段）、`CMakeLists.txt`（git tag 解析） |
+| 修改 PyPI 发布流程 | `.github/workflows/wheels.yml`（publish-pypi / publish-testpypi job） |
 
 ## 核心类型与 API
 

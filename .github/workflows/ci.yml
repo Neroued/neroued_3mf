@@ -1,0 +1,217 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  WIN_VCPKG_ROOT: C:/vcpkg
+  WIN_VCPKG_TRIPLET: x64-windows
+
+jobs:
+  # ── C++ format check (changed files only) ─────────────────────────────────
+  format-check:
+    name: clang-format
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format-18
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format-18
+
+      - name: Check formatting of changed files
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          FILES=$(git diff --name-only --diff-filter=ACM "$BASE" HEAD \
+            | grep -E '\.(cpp|h|hpp|cc|cxx)$' \
+            | grep -E '^(src|include|python|tests)/' || true)
+
+          if [ -z "$FILES" ]; then
+            echo "No C++ files changed, skipping."
+            exit 0
+          fi
+
+          echo "Checking formatting for:"
+          echo "$FILES"
+          FAILED=0
+          for f in $FILES; do
+            if ! clang-format-18 --dry-run --Werror "$f" 2>/dev/null; then
+              echo "::error file=$f::Format mismatch. Run: clang-format -i $f"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::Some files need formatting."
+            exit 1
+          fi
+          echo "All changed C++ files are correctly formatted."
+
+  # ── C++ build & test ──────────────────────────────────────────────────────
+  cpp-build:
+    name: C++ (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Linux ─────────────────────────────────────────────────────────────
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zlib1g-dev ninja-build ccache
+          mkdir -p ~/.cache/ccache
+
+      - name: Cache ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: ccache-linux-
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          ccache --set-config=max_size=500M
+          ccache -z
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DN3MF_BUILD_TESTS=ON
+
+      # ── macOS ─────────────────────────────────────────────────────────────
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja ccache
+
+      - name: Cache ccache (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: ccache-macos-
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          ccache --set-config=max_size=500M
+          ccache -z
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DN3MF_BUILD_TESTS=ON
+
+      # ── Windows ───────────────────────────────────────────────────────────
+      - name: Cache vcpkg packages (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WIN_VCPKG_ROOT }}/installed
+          key: vcpkg-win-zlib-${{ runner.os }}
+          restore-keys: vcpkg-win-zlib-
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install zlib:${{ env.WIN_VCPKG_TRIPLET }}
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.WIN_VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ env.WIN_VCPKG_TRIPLET }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DN3MF_BUILD_TESTS=ON
+
+      # ── Build & test ──────────────────────────────────────────────────────
+      - name: Build
+        run: cmake --build build --config Release -j4
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: ccache stats
+        if: always() && runner.os != 'Windows'
+        run: ccache -s
+
+  # ── Python bindings build & test ──────────────────────────────────────────
+  python-test:
+    name: Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zlib1g-dev
+
+      - name: Cache vcpkg packages (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WIN_VCPKG_ROOT }}/installed
+          key: vcpkg-win-zlib-${{ runner.os }}
+          restore-keys: vcpkg-win-zlib-
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install zlib:${{ env.WIN_VCPKG_TRIPLET }}
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package (Unix)
+        if: runner.os != 'Windows'
+        run: pip install --verbose .
+
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
+        run: pip install --verbose .
+        env:
+          CMAKE_TOOLCHAIN_FILE: ${{ env.WIN_VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake
+          SKBUILD_CMAKE_DEFINE: "VCPKG_TARGET_TRIPLET=${{ env.WIN_VCPKG_TRIPLET }}"
+
+      - name: Run tests
+        run: |
+          pip install pytest
+          pytest python/tests -v
