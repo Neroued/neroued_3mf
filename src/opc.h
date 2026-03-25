@@ -5,10 +5,13 @@
 
 #include "neroued/3mf/document.h"
 
+#include "internal/omp_config.h"
 #include "internal/opc_types.h"
 #include "internal/xml_stream_buffer.h"
 #include "internal/xml_util.h"
 
+#include <cstddef>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -212,16 +215,44 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, Sink
             buf.Append(i8);
             buf.Append("<vertices>\n");
 
-            for (std::size_t vi = 0; vi < mesh.vertices.size(); ++vi) {
-                const auto &v = mesh.vertices[vi];
-                buf.Append(i10);
-                buf.Append("<vertex x=\"");
-                buf.AppendFloat(v.x);
-                buf.Append("\" y=\"");
-                buf.AppendFloat(v.y);
-                buf.Append("\" z=\"");
-                buf.AppendFloat(v.z);
-                buf.Append("\"/>\n");
+#if defined(NEROUED_3MF_HAS_OPENMP)
+            if (mesh.vertices.size() > kOmpMeshXmlThreshold) {
+                int max_threads = omp_get_max_threads();
+                std::vector<std::string> vbufs(max_threads);
+                auto nv = static_cast<std::ptrdiff_t>(mesh.vertices.size());
+                std::size_t est = static_cast<std::size_t>(nv / max_threads + 1) * 80;
+                for (auto &vb : vbufs) { vb.reserve(est); }
+
+#pragma omp parallel for schedule(static)
+                for (std::ptrdiff_t vi = 0; vi < nv; ++vi) {
+                    auto &local = vbufs[omp_get_thread_num()];
+                    const auto &v = mesh.vertices[static_cast<std::size_t>(vi)];
+                    local += i10;
+                    local += "<vertex x=\"";
+                    AppendFloat(local, v.x);
+                    local += "\" y=\"";
+                    AppendFloat(local, v.y);
+                    local += "\" z=\"";
+                    AppendFloat(local, v.z);
+                    local += "\"/>\n";
+                }
+                for (const auto &vb : vbufs) {
+                    if (!vb.empty()) { buf.Append(vb); }
+                }
+            } else
+#endif
+            {
+                for (std::size_t vi = 0; vi < mesh.vertices.size(); ++vi) {
+                    const auto &v = mesh.vertices[vi];
+                    buf.Append(i10);
+                    buf.Append("<vertex x=\"");
+                    buf.AppendFloat(v.x);
+                    buf.Append("\" y=\"");
+                    buf.AppendFloat(v.y);
+                    buf.Append("\" z=\"");
+                    buf.AppendFloat(v.z);
+                    buf.Append("\"/>\n");
+                }
             }
 
             buf.Append(i8);
@@ -230,29 +261,71 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, Sink
             buf.Append("<triangles>\n");
 
             bool has_props = !mesh.triangle_properties.empty();
-            for (std::size_t ti = 0; ti < mesh.triangles.size(); ++ti) {
-                const auto &tri = mesh.triangles[ti];
-                buf.Append(i10);
-                buf.Append("<triangle v1=\"");
-                buf.AppendUint32(tri.v1);
-                buf.Append("\" v2=\"");
-                buf.AppendUint32(tri.v2);
-                buf.Append("\" v3=\"");
-                buf.AppendUint32(tri.v3);
-                buf.Append("\"");
-                if (has_props && ti < mesh.triangle_properties.size()) {
-                    const auto &tp = mesh.triangle_properties[ti];
-                    buf.Append(" pid=\"");
-                    buf.AppendUint32(tp.pid);
-                    buf.Append("\" p1=\"");
-                    buf.AppendUint32(tp.p1);
-                    buf.Append("\" p2=\"");
-                    buf.AppendUint32(tp.p2);
-                    buf.Append("\" p3=\"");
-                    buf.AppendUint32(tp.p3);
-                    buf.Append("\"");
+#if defined(NEROUED_3MF_HAS_OPENMP)
+            if (mesh.triangles.size() > kOmpMeshXmlThreshold) {
+                int max_threads = omp_get_max_threads();
+                std::vector<std::string> tbufs(max_threads);
+                auto nt = static_cast<std::ptrdiff_t>(mesh.triangles.size());
+                std::size_t est = static_cast<std::size_t>(nt / max_threads + 1) * 100;
+                for (auto &tb : tbufs) { tb.reserve(est); }
+
+#pragma omp parallel for schedule(static)
+                for (std::ptrdiff_t ti = 0; ti < nt; ++ti) {
+                    auto idx = static_cast<std::size_t>(ti);
+                    auto &local = tbufs[omp_get_thread_num()];
+                    const auto &tri = mesh.triangles[idx];
+                    local += i10;
+                    local += "<triangle v1=\"";
+                    AppendUint32(local, tri.v1);
+                    local += "\" v2=\"";
+                    AppendUint32(local, tri.v2);
+                    local += "\" v3=\"";
+                    AppendUint32(local, tri.v3);
+                    local += "\"";
+                    if (has_props && idx < mesh.triangle_properties.size()) {
+                        const auto &tp = mesh.triangle_properties[idx];
+                        local += " pid=\"";
+                        AppendUint32(local, tp.pid);
+                        local += "\" p1=\"";
+                        AppendUint32(local, tp.p1);
+                        local += "\" p2=\"";
+                        AppendUint32(local, tp.p2);
+                        local += "\" p3=\"";
+                        AppendUint32(local, tp.p3);
+                        local += "\"";
+                    }
+                    local += "/>\n";
                 }
-                buf.Append("/>\n");
+                for (const auto &tb : tbufs) {
+                    if (!tb.empty()) { buf.Append(tb); }
+                }
+            } else
+#endif
+            {
+                for (std::size_t ti = 0; ti < mesh.triangles.size(); ++ti) {
+                    const auto &tri = mesh.triangles[ti];
+                    buf.Append(i10);
+                    buf.Append("<triangle v1=\"");
+                    buf.AppendUint32(tri.v1);
+                    buf.Append("\" v2=\"");
+                    buf.AppendUint32(tri.v2);
+                    buf.Append("\" v3=\"");
+                    buf.AppendUint32(tri.v3);
+                    buf.Append("\"");
+                    if (has_props && ti < mesh.triangle_properties.size()) {
+                        const auto &tp = mesh.triangle_properties[ti];
+                        buf.Append(" pid=\"");
+                        buf.AppendUint32(tp.pid);
+                        buf.Append("\" p1=\"");
+                        buf.AppendUint32(tp.p1);
+                        buf.Append("\" p2=\"");
+                        buf.AppendUint32(tp.p2);
+                        buf.Append("\" p3=\"");
+                        buf.AppendUint32(tp.p3);
+                        buf.Append("\"");
+                    }
+                    buf.Append("/>\n");
+                }
             }
 
             buf.Append(i8);

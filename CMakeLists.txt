@@ -29,9 +29,15 @@ include(CMakePackageConfigHelpers)
 
 # -- Options -----------------------------------------------------------------
 option(N3MF_BUILD_TESTS "Build unit tests" ON)
+option(N3MF_USE_OPENMP  "Enable OpenMP parallelization" ON)
 
 # -- zlib (optional, enables deflate compression) ----------------------------
 find_package(ZLIB QUIET)
+
+# -- OpenMP (optional, enables parallel processing) -------------------------
+if(N3MF_USE_OPENMP)
+    find_package(OpenMP QUIET)
+endif()
 
 # -- Generate version.h -----------------------------------------------------
 configure_file(
@@ -63,6 +69,14 @@ if(ZLIB_FOUND)
     message(STATUS "neroued_3mf: zlib found, deflate compression enabled")
 else()
     message(STATUS "neroued_3mf: zlib not found, using store-only compression")
+endif()
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(neroued_3mf PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_definitions(neroued_3mf PRIVATE NEROUED_3MF_HAS_OPENMP=1)
+    message(STATUS "neroued_3mf: OpenMP found, parallel processing enabled")
+else()
+    message(STATUS "neroued_3mf: OpenMP not found, using serial processing")
 endif()
 
 target_compile_options(neroued_3mf PRIVATE

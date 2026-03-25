@@ -8,6 +8,7 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -48,6 +49,21 @@ inline std::string FormatFloat(float value) {
                                 std::numeric_limits<float>::max_digits10);
     if (result.ec != std::errc()) { throw IOError("Failed to format float value"); }
     return std::string(buffer, result.ptr);
+}
+
+inline void AppendFloat(std::string &out, float value) {
+    if (!std::isfinite(value)) { throw InputError("Non-finite float in 3MF serialization"); }
+    char buffer[64];
+    auto result = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general,
+                                std::numeric_limits<float>::max_digits10);
+    if (result.ec != std::errc()) { throw IOError("Failed to format float value"); }
+    out.append(buffer, result.ptr);
+}
+
+inline void AppendUint32(std::string &out, uint32_t value) {
+    char buffer[16];
+    auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    out.append(buffer, result.ptr);
 }
 
 inline std::string SerializeTransform(const Transform &transform) {

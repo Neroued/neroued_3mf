@@ -5,10 +5,13 @@
 
 #include "neroued/3mf/error.h"
 
+#include "internal/omp_config.h"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <limits>
 
@@ -88,6 +91,46 @@ BBox Mesh::ComputeBoundingBox() const {
 
     BBox box;
     box.min = box.max = vertices[0];
+
+#if defined(NEROUED_3MF_HAS_OPENMP)
+    if (vertices.size() > detail::kOmpBBoxThreshold) {
+        float gmin_x = box.min.x, gmin_y = box.min.y, gmin_z = box.min.z;
+        float gmax_x = box.max.x, gmax_y = box.max.y, gmax_z = box.max.z;
+        auto n = static_cast<std::ptrdiff_t>(vertices.size());
+
+#pragma omp parallel
+        {
+            float lmin_x = gmin_x, lmin_y = gmin_y, lmin_z = gmin_z;
+            float lmax_x = gmax_x, lmax_y = gmax_y, lmax_z = gmax_z;
+
+#pragma omp for nowait schedule(static)
+            for (std::ptrdiff_t i = 1; i < n; ++i) {
+                const auto &v = vertices[static_cast<std::size_t>(i)];
+                if (v.x < lmin_x) lmin_x = v.x;
+                if (v.y < lmin_y) lmin_y = v.y;
+                if (v.z < lmin_z) lmin_z = v.z;
+                if (v.x > lmax_x) lmax_x = v.x;
+                if (v.y > lmax_y) lmax_y = v.y;
+                if (v.z > lmax_z) lmax_z = v.z;
+            }
+
+#pragma omp critical
+            {
+                if (lmin_x < gmin_x) gmin_x = lmin_x;
+                if (lmin_y < gmin_y) gmin_y = lmin_y;
+                if (lmin_z < gmin_z) gmin_z = lmin_z;
+                if (lmax_x > gmax_x) gmax_x = lmax_x;
+                if (lmax_y > gmax_y) gmax_y = lmax_y;
+                if (lmax_z > gmax_z) gmax_z = lmax_z;
+            }
+        }
+
+        box.min = {gmin_x, gmin_y, gmin_z};
+        box.max = {gmax_x, gmax_y, gmax_z};
+        return box;
+    }
+#endif
+
     for (std::size_t i = 1; i < vertices.size(); ++i) {
         const auto &v = vertices[i];
         box.min.x = std::min(box.min.x, v.x);
@@ -122,6 +165,30 @@ void Mesh::Append(const MeshView &other) {
 ValidationResult Mesh::Validate() const {
     ValidationResult result;
     auto vcount = vertices.size();
+
+#if defined(NEROUED_3MF_HAS_OPENMP)
+    if (triangles.size() > detail::kOmpValidateThreshold) {
+        std::size_t degenerate = 0;
+        std::size_t out_of_range = 0;
+        auto n = static_cast<std::ptrdiff_t>(triangles.size());
+
+#pragma omp parallel for reduction(+ : degenerate, out_of_range) schedule(static)
+        for (std::ptrdiff_t i = 0; i < n; ++i) {
+            const auto &tri = triangles[static_cast<std::size_t>(i)];
+            if (tri.v1 >= vcount || tri.v2 >= vcount || tri.v3 >= vcount) {
+                ++out_of_range;
+            } else if (IsDegenerateByIndex(tri)) {
+                ++degenerate;
+            } else if (IsDegenerateByArea(vertices[tri.v1], vertices[tri.v2], vertices[tri.v3])) {
+                ++degenerate;
+            }
+        }
+
+        result.degenerate_count = degenerate;
+        result.out_of_range_count = out_of_range;
+        return result;
+    }
+#endif
 
     for (const auto &tri : triangles) {
         if (tri.v1 >= vcount || tri.v2 >= vcount || tri.v3 >= vcount) {
