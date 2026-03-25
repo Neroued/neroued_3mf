@@ -24,6 +24,10 @@ struct WriteOptions {
     bool deterministic = true;
     /// Omit XML indentation to reduce output size (~15-20% smaller).
     bool compact_xml = false;
+    /// Significant digits for vertex coordinates (1-9). Default 9 = full float32 precision.
+    /// Lower values reduce XML size at the cost of geometric precision.
+    /// Transform matrices always use full precision regardless of this setting.
+    int vertex_precision = 9;
 };
 
 /// Write a Document to an in-memory buffer.

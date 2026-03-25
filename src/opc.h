@@ -62,8 +62,9 @@ enum class MeshXmlFormat { FlatModel, ObjectsModel };
 /// Stream mesh data as XML fragments to a sink callback (zero-allocation hot path).
 /// The sink is a template parameter to enable inlining (avoids std::function overhead).
 template <typename Sink>
-void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, Sink &&sink) {
-    XmlStreamBuffer<std::remove_reference_t<Sink>> buf(sink);
+void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, int vertex_precision,
+                   Sink &&sink) {
+    XmlStreamBuffer<std::remove_reference_t<Sink>> buf(sink, vertex_precision);
 
     const std::string_view i2 = compact ? "" : "  ";
     const std::string_view i4 = compact ? "" : "    ";
@@ -229,11 +230,11 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, Sink
                     const auto &v = mesh.vertices[static_cast<std::size_t>(vi)];
                     local += i10;
                     local += "<vertex x=\"";
-                    AppendFloat(local, v.x);
+                    AppendFloat(local, v.x, vertex_precision);
                     local += "\" y=\"";
-                    AppendFloat(local, v.y);
+                    AppendFloat(local, v.y, vertex_precision);
                     local += "\" z=\"";
-                    AppendFloat(local, v.z);
+                    AppendFloat(local, v.z, vertex_precision);
                     local += "\"/>\n";
                 }
                 for (const auto &vb : vbufs) {

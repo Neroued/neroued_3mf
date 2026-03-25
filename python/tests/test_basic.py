@@ -256,6 +256,33 @@ class TestWriteOptions:
         assert opts.compression == n3mf.WriteOptions.Compression.Auto
         assert opts.deterministic is True
         assert opts.compact_xml is False
+        assert opts.vertex_precision == 9
+
+    def test_vertex_precision_reduces_size(self):
+        mesh = n3mf.Mesh()
+        mesh.vertices = [
+            n3mf.Vec3f(1.23456789, 2.34567890, 3.45678901),
+            n3mf.Vec3f(10.1234567, 0.00123456, 5.67890123),
+            n3mf.Vec3f(5.55555555, 10.1010101, 0.99999999),
+        ]
+        mesh.triangles = [n3mf.IndexTriangle(0, 1, 2)]
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object("Part", mesh)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+
+        opts_full = n3mf.WriteOptions()
+        opts_full.compression = n3mf.WriteOptions.Compression.Store
+        opts_full.vertex_precision = 9
+        buf_full = n3mf.write_to_buffer(doc, opts_full)
+
+        opts_low = n3mf.WriteOptions()
+        opts_low.compression = n3mf.WriteOptions.Compression.Store
+        opts_low.vertex_precision = 3
+        buf_low = n3mf.write_to_buffer(doc, opts_low)
+
+        assert len(buf_low) < len(buf_full)
+        assert buf_low[:2] == b"PK"
 
 
 # ---------------------------------------------------------------------------
