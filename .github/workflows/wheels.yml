@@ -46,7 +46,7 @@ jobs:
           OMP_PREFIX=$(brew --prefix libomp)
           echo "CIBW_ENVIRONMENT_MACOS=MACOSX_DEPLOYMENT_TARGET=14.0 SKBUILD_CMAKE_DEFINE=\"OpenMP_ROOT=${OMP_PREFIX}\"" >> "$GITHUB_ENV"
 
-      - uses: pypa/cibuildwheel@v2.23
+      - uses: pypa/cibuildwheel@v3.4.0
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ env.SETUPTOOLS_SCM_PRETEND_VERSION }}
