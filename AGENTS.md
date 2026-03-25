@@ -35,7 +35,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 - `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate）
 - `tests/`：单元测试（GoogleTest）
 - `cmake/`：CMake 配置模板（find_package 支持）
-- `docs/`：设计文档
+- `docs/`：项目文档（设计、API 参考、构建指南、示例）
 
 ## 按任务快速定位
 
@@ -54,6 +54,10 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 新增/修改测试 | `tests/test_types.cpp`、`tests/test_builder.cpp`、`tests/test_writer.cpp` |
 | 添加缩略图支持 | `document.h`（Thumbnail）、`builder.h`、`opc.cpp`、`writer.cpp` |
 | 修改核心组件支持 | `document.h`（Component）、`builder.h`、`opc.h`（StreamMeshXml）、`validate.h` |
+| 更新 API 文档 | `docs/API.md` |
+| 更新构建/集成文档 | `docs/BUILDING.md` |
+| 更新用法示例文档 | `docs/EXAMPLES.md` |
+| 更新设计文档 | `docs/DESIGN.md` |
 
 ## 核心类型与 API
 
@@ -100,9 +104,10 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 - [ ] C++ 文件执行 `clang-format -i <modified-files>`（已由 hook 自动执行）
 - [ ] 构建通过：`cd build && cmake .. && cmake --build . -j$(nproc)`
 - [ ] 测试通过：`cd build && ctest --output-on-failure`
-- [ ] 公共 API 变更 → 更新 README.md API Overview
-- [ ] Document 模型变更 → 更新 DESIGN.md 对应章节
-- [ ] 配置参数增删 → 更新 README.md CMake Options
+- [ ] 公共 API 变更 → 更新 docs/API.md
+- [ ] Document 模型变更 → 更新 docs/DESIGN.md 对应章节
+- [ ] 配置参数增删 → 更新 docs/BUILDING.md CMake Options
+- [ ] 用法示例变更 → 更新 docs/EXAMPLES.md
 - [ ] 新增文件 → 更新 CMakeLists.txt 和 AGENTS.md 目录映射
 - [ ] 不引入重复工具函数
 - [ ] 不在公共头文件中暴露内部实现细节
