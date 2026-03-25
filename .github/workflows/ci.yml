@@ -191,10 +191,7 @@ jobs:
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          vcpkg install zlib:${{ env.WIN_VCPKG_TRIPLET }}
-          echo "${{ env.WIN_VCPKG_ROOT }}/installed/${{ env.WIN_VCPKG_TRIPLET }}/bin" >> $GITHUB_PATH
+        run: vcpkg install zlib:${{ env.WIN_VCPKG_TRIPLET }}
 
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
@@ -218,3 +215,5 @@ jobs:
         run: |
           pip install pytest
           pytest python/tests -v
+        env:
+          N3MF_DLL_DIR: ${{ runner.os == 'Windows' && format('{0}/installed/{1}/bin', env.WIN_VCPKG_ROOT, env.WIN_VCPKG_TRIPLET) || '' }}
