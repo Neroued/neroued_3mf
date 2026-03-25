@@ -115,6 +115,7 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 | `deflate_level` | `int` | `1` | zlib compression level (1-9) |
 | `deterministic` | `bool` | `true` | Zero timestamps for reproducible output |
 | `compact_xml` | `bool` | `false` | Omit XML indentation (~15-20% smaller) |
+| `vertex_precision` | `int` | `9` | Significant digits for vertex coordinates (1-9). Transform matrices always use full precision |
 
 ## Error Types (`error.h`)
 

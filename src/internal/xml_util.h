@@ -51,11 +51,12 @@ inline std::string FormatFloat(float value) {
     return std::string(buffer, result.ptr);
 }
 
-inline void AppendFloat(std::string &out, float value) {
+inline void AppendFloat(std::string &out, float value,
+                        int precision = std::numeric_limits<float>::max_digits10) {
     if (!std::isfinite(value)) { throw InputError("Non-finite float in 3MF serialization"); }
     char buffer[64];
     auto result = std::to_chars(buffer, buffer + sizeof(buffer), value, std::chars_format::general,
-                                std::numeric_limits<float>::max_digits10);
+                                precision);
     if (result.ec != std::errc()) { throw IOError("Failed to format float value"); }
     out.append(buffer, result.ptr);
 }

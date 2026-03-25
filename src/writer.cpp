@@ -114,7 +114,7 @@ void WriteAllEntries(detail::StreamingZipWriter &zip, const Document &doc,
 
             zip.BeginDeflateEntry("3D/Objects/object_1.model");
             detail::StreamMeshXml(merged_doc, detail::MeshXmlFormat::ObjectsModel, opts.compact_xml,
-                                  zip_sink);
+                                  opts.vertex_precision, zip_sink);
             zip.EndEntry();
         } else {
             for (std::size_t i = 0; i < doc.objects.size(); ++i) {
@@ -129,13 +129,14 @@ void WriteAllEntries(detail::StreamingZipWriter &zip, const Document &doc,
 
                 zip.BeginDeflateEntry(ext_path);
                 detail::StreamMeshXml(single_doc, detail::MeshXmlFormat::ObjectsModel,
-                                      opts.compact_xml, zip_sink);
+                                      opts.compact_xml, opts.vertex_precision, zip_sink);
                 zip.EndEntry();
             }
         }
     } else {
         zip.BeginDeflateEntry("3D/3dmodel.model");
-        detail::StreamMeshXml(doc, detail::MeshXmlFormat::FlatModel, opts.compact_xml, zip_sink);
+        detail::StreamMeshXml(doc, detail::MeshXmlFormat::FlatModel, opts.compact_xml,
+                              opts.vertex_precision, zip_sink);
         zip.EndEntry();
     }
 

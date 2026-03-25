@@ -177,6 +177,16 @@ opts.deflate_level = 6;
 auto buf = neroued_3mf::WriteToBuffer(doc, opts);
 ```
 
+### Vertex Precision
+
+Reduce vertex coordinate digits to shrink XML size (default 9 = full float32 precision):
+
+```cpp
+opts.vertex_precision = 6;  // 6 significant digits (~30% smaller vertex XML)
+```
+
+Transform matrices always use full precision regardless of this setting.
+
 ### Compact XML
 
 Reduces XML output size by ~15-20% by omitting indentation:

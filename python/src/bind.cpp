@@ -454,7 +454,8 @@ NB_MODULE(_neroued_3mf, m) {
         .def_rw("compression_threshold", &n3mf::WriteOptions::compression_threshold)
         .def_rw("deflate_level", &n3mf::WriteOptions::deflate_level)
         .def_rw("deterministic", &n3mf::WriteOptions::deterministic)
-        .def_rw("compact_xml", &n3mf::WriteOptions::compact_xml);
+        .def_rw("compact_xml", &n3mf::WriteOptions::compact_xml)
+        .def_rw("vertex_precision", &n3mf::WriteOptions::vertex_precision);
 
     // ---- DocumentBuilder ---------------------------------------------------
 

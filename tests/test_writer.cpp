@@ -572,3 +572,36 @@ TEST(Writer, BuildItemUUIDInFlatModel) {
 
     EXPECT_TRUE(ContainsSubstring(buf, "p:UUID=\"item-uuid-5678\""));
 }
+
+TEST(Writer, VertexPrecisionReducesSize) {
+    n3mf::Mesh mesh;
+    mesh.vertices = {{1.23456789f, 2.34567890f, 3.45678901f},
+                     {10.1234567f, 0.00123456f, 5.67890123f},
+                     {5.55555555f, 10.1010101f, 0.99999999f}};
+    mesh.triangles = {{0, 1, 2}};
+
+    n3mf::DocumentBuilder builder;
+    auto obj = builder.AddMeshObject("Part", std::move(mesh));
+    builder.AddBuildItem(obj);
+    auto doc = builder.Build();
+
+    n3mf::WriteOptions opts_full;
+    opts_full.compression = n3mf::WriteOptions::Compression::Store;
+    opts_full.vertex_precision = 9;
+    auto buf_full = n3mf::WriteToBuffer(doc, opts_full);
+
+    n3mf::WriteOptions opts_low;
+    opts_low.compression = n3mf::WriteOptions::Compression::Store;
+    opts_low.vertex_precision = 3;
+    auto buf_low = n3mf::WriteToBuffer(doc, opts_low);
+
+    EXPECT_LT(buf_low.size(), buf_full.size());
+    EXPECT_GT(buf_low.size(), 100u);
+    EXPECT_EQ(buf_low[0], 0x50);
+    EXPECT_EQ(buf_low[1], 0x4B);
+}
+
+TEST(Writer, VertexPrecisionDefault) {
+    n3mf::WriteOptions opts;
+    EXPECT_EQ(opts.vertex_precision, 9);
+}
