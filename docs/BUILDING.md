@@ -4,6 +4,7 @@
 
 - **C++20** compiler (GCC 11+, Clang 14+, MSVC 2022+)
 - **zlib** (optional) — enables deflate compression; without it, store-only is used
+- **OpenMP** (optional) — enables parallel processing for large meshes; without it, serial processing is used
 - **GoogleTest** (fetched automatically when tests are enabled)
 
 ## Build from Source
@@ -25,6 +26,17 @@ cd build && ctest --output-on-failure
 | Option | Default | Description |
 |--------|---------|-------------|
 | `N3MF_BUILD_TESTS` | `ON` | Build unit tests (requires internet for GoogleTest fetch) |
+| `N3MF_USE_OPENMP` | `ON` | Enable OpenMP parallel processing for large meshes |
+
+### OpenMP Notes
+
+OpenMP is detected automatically via `find_package(OpenMP)`. Platform-specific notes:
+
+- **Linux (GCC)**: OpenMP is built-in, no extra setup needed.
+- **Windows (MSVC)**: OpenMP is supported natively via `/openmp`. Code targets OpenMP 2.0 features for maximum MSVC compatibility (signed loop counters, manual min/max reduction).
+- **macOS (Apple Clang)**: Requires `libomp` from Homebrew: `brew install libomp`. Pass the path hint to CMake: `-DOpenMP_ROOT=$(brew --prefix libomp)`.
+
+If OpenMP is not found, the library builds and works correctly using serial processing.
 
 ## Integration
 

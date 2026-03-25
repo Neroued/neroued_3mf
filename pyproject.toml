@@ -65,7 +65,8 @@ before-all = "yum install -y zlib-devel || true"
 manylinux-x86_64-image = "manylinux_2_28"
 
 [tool.cibuildwheel.macos]
-environment = { MACOSX_DEPLOYMENT_TARGET = "13.0" }
+before-all = "brew install libomp"
+environment = { MACOSX_DEPLOYMENT_TARGET = "13.0", SKBUILD_CMAKE_ARGS = "-DOpenMP_ROOT=/opt/homebrew/opt/libomp" }
 test-skip = "*-macosx_x86_64"
 
 [tool.cibuildwheel.windows]

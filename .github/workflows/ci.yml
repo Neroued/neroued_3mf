@@ -102,7 +102,7 @@ jobs:
       # ── macOS ─────────────────────────────────────────────────────────────
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja ccache
+        run: brew install ninja ccache libomp
 
       - name: Cache ccache (macOS)
         if: runner.os == 'macOS'
@@ -122,7 +122,8 @@ jobs:
           ccache -z
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DN3MF_BUILD_TESTS=ON
+            -DN3MF_BUILD_TESTS=ON \
+            -DOpenMP_ROOT=$(brew --prefix libomp)
 
       # ── Windows ───────────────────────────────────────────────────────────
       - name: Cache vcpkg packages (Windows)
@@ -181,6 +182,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zlib1g-dev
 
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
         uses: actions/cache@v4
@@ -200,9 +205,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install package (Unix)
-        if: runner.os != 'Windows'
+      - name: Install package (Linux)
+        if: runner.os == 'Linux'
         run: pip install --verbose .
+
+      - name: Install package (macOS)
+        if: runner.os == 'macOS'
+        run: pip install --verbose .
+        env:
+          SKBUILD_CMAKE_DEFINE: "OpenMP_ROOT=$(brew --prefix libomp)"
 
       - name: Install package (Windows)
         if: runner.os == 'Windows'

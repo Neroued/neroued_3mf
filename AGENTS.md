@@ -32,7 +32,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 
 - `include/neroued/3mf/`：公共 API 头文件
 - `src/`：库实现（builder、writer、opc、zip）
-- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate）
+- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、omp_config）
 - `tests/`：单元测试（GoogleTest）
 - `python/`：Python 绑定（nanobind + scikit-build-core）
   - `python/src/bind.cpp`：nanobind 绑定源码
@@ -60,6 +60,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 修改 CMake 构建 / 安装 | `CMakeLists.txt`、`cmake/neroued_3mf-config.cmake.in` |
 | 为 Reader 做准备 | `include/neroued/3mf/error.h`（FormatError）、`document.h`（Document 共享模型） |
 | 修改核心几何类型 | `include/neroued/3mf/types.h`、`src/types.cpp` |
+| 修改 OpenMP 并行配置 | `src/internal/omp_config.h`（阈值常量）、`CMakeLists.txt`（`N3MF_USE_OPENMP`） |
 | 新增/修改测试 | `tests/test_types.cpp`、`tests/test_builder.cpp`、`tests/test_writer.cpp` |
 | 添加缩略图支持 | `document.h`（Thumbnail）、`builder.h`、`opc.cpp`、`writer.cpp` |
 | 修改核心组件支持 | `document.h`（Component）、`builder.h`、`opc.h`（StreamMeshXml）、`validate.h` |
