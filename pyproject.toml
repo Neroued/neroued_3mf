@@ -67,7 +67,6 @@ manylinux-x86_64-image = "manylinux_2_28"
 [tool.cibuildwheel.macos]
 before-all = "brew install libomp"
 environment = { MACOSX_DEPLOYMENT_TARGET = "13.3", SKBUILD_CMAKE_DEFINE = "OpenMP_ROOT=/opt/homebrew/opt/libomp" }
-test-skip = "*-macosx_x86_64"
 
 [tool.cibuildwheel.windows]
 before-all = "vcpkg install zlib:x64-windows"

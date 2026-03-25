@@ -17,7 +17,9 @@ jobs:
           - os: ubuntu-24.04
             arch: x86_64
           - os: macos-14
-            arch: "x86_64 arm64"
+            arch: arm64
+          - os: macos-13
+            arch: x86_64
           - os: windows-latest
             arch: AMD64
 
@@ -38,6 +40,13 @@ jobs:
           path: C:/vcpkg/installed
           key: vcpkg-win-zlib-${{ runner.os }}
           restore-keys: vcpkg-win-zlib-
+
+      - name: Set macOS cibuildwheel env
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          OMP_PREFIX=$(brew --prefix libomp)
+          echo "CIBW_ENVIRONMENT_MACOS=MACOSX_DEPLOYMENT_TARGET=13.3 SKBUILD_CMAKE_DEFINE=\"OpenMP_ROOT=${OMP_PREFIX}\"" >> "$GITHUB_ENV"
 
       - uses: pypa/cibuildwheel@v2.23
         env:
