@@ -37,6 +37,18 @@ doc = builder.build()
 n3mf.write_to_file("output.3mf", doc)
 ```
 
+With NumPy arrays (e.g. from trimesh):
+
+```python
+import numpy as np
+import neroued_3mf as n3mf
+
+mesh = n3mf.Mesh.from_arrays(
+    vertices=trimesh_mesh.vertices,   # (N, 3) float64
+    triangles=trimesh_mesh.faces,     # (M, 3) int64
+)
+```
+
 ### C++
 
 ```cpp
