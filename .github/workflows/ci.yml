@@ -191,7 +191,10 @@ jobs:
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install zlib:${{ env.WIN_VCPKG_TRIPLET }}
+        shell: bash
+        run: |
+          vcpkg install zlib:${{ env.WIN_VCPKG_TRIPLET }}
+          echo "${{ env.WIN_VCPKG_ROOT }}/installed/${{ env.WIN_VCPKG_TRIPLET }}/bin" >> $GITHUB_PATH
 
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'

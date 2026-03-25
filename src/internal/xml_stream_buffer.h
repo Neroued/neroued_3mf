@@ -17,6 +17,10 @@ namespace neroued_3mf::detail {
 
 /// Fixed-size output buffer that flushes to a sink callback, avoiding per-element heap allocations.
 /// All numeric formatting (float, uint32) writes directly into the internal buffer.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4324) // structure padded due to alignas — intentional
+#endif
 template <typename Sink> class XmlStreamBuffer {
   public:
     static constexpr std::size_t kCapacity = 65536;
@@ -78,5 +82,8 @@ template <typename Sink> class XmlStreamBuffer {
     alignas(64) char buf_[kCapacity];
     std::size_t pos_ = 0;
 };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 } // namespace neroued_3mf::detail
