@@ -32,7 +32,8 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 
 - `include/neroued/3mf/`：公共 API 头文件
 - `src/`：库实现（builder、writer、opc、zip）
-- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、omp_config）
+- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、omp_config、sha256、watermark、zip_read）
+- `tools/`：CLI 工具（`n3mf_detect` 水印检测、`n3mf_generate_test` 测试文件生成）
 - `tests/`：单元测试（GoogleTest）
 - `python/`：Python 绑定（nanobind + scikit-build-core）
   - `python/src/bind.cpp`：nanobind 绑定源码
@@ -59,6 +60,9 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 添加自定义扩展支持 | `include/neroued/3mf/document.h`（CustomPart / CustomRelationship） |
 | 修改 CMake 构建 / 安装 | `CMakeLists.txt`、`cmake/neroued_3mf-config.cmake.in` |
 | 为 Reader 做准备 | `include/neroued/3mf/error.h`（FormatError）、`document.h`（Document 共享模型） |
+| 修改水印编码逻辑 | `src/internal/watermark.h`、`src/internal/sha256.h`、`include/neroued/3mf/writer.h`（WatermarkConfig）|
+| 修改水印检测逻辑 | `src/watermark_detect.cpp`、`include/neroued/3mf/watermark.h`、`src/internal/zip_read.h` |
+| 修改 L2 ZIP 签名 | `src/zip.cpp`（kLibExtraField、IsModelEntry） |
 | 修改核心几何类型 | `include/neroued/3mf/types.h`、`src/types.cpp` |
 | 修改 OpenMP 并行配置 | `src/internal/omp_config.h`（阈值常量）、`CMakeLists.txt`（`N3MF_USE_OPENMP`） |
 | 新增/修改测试 | `tests/test_types.cpp`、`tests/test_builder.cpp`、`tests/test_writer.cpp` |
@@ -89,7 +93,8 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | `materials.h` | `BaseMaterial`、`BaseMaterialGroup` |
 | `document.h` | `Document`、`Object`、`BuildItem`、`Component`、`Thumbnail`、`ObjectType`、`CustomPart`/`CustomRelationship` |
 | `builder.h` | `DocumentBuilder`（Builder 模式构建 Document） |
-| `writer.h` | `WriteToBuffer`、`WriteToFile`、`WriteToStream`、`WriteOptions` |
+| `writer.h` | `WriteToBuffer`、`WriteToFile`、`WriteToStream`、`WriteOptions`、`WatermarkConfig` |
+| `watermark.h` | `WatermarkResult`、`DetectWatermark`、`HasL2Signature` |
 | `error.h` | `InputError`、`IOError`、`FormatError` |
 
 ### 命名空间

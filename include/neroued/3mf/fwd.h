@@ -36,7 +36,9 @@ struct Document;
 
 class DocumentBuilder;
 
+struct WatermarkConfig;
 struct WriteOptions;
+struct WatermarkResult;
 
 class InputError;
 class IOError;

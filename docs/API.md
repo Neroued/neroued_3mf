@@ -116,6 +116,37 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 | `deterministic` | `bool` | `true` | Zero timestamps for reproducible output |
 | `compact_xml` | `bool` | `false` | Omit XML indentation (~15-20% smaller) |
 | `vertex_precision` | `int` | `9` | Significant digits for vertex coordinates (1-9). Transform matrices always use full precision |
+| `watermark` | `WatermarkConfig` | (disabled) | L1 triangle-rotation watermark configuration |
+
+### WatermarkConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `payload` | `vector<uint8_t>` | (empty) | Data to embed. Empty = no L1 watermark |
+| `key` | `vector<uint8_t>` | (empty) | Encryption key. Empty = unencrypted (payload readable without key) |
+| `repetition` | `int` | `3` | Redundancy factor: 1, 3, or 5 (majority-vote error correction) |
+
+The watermark encodes arbitrary bytes into the cyclic ordering of triangle vertex indices. Each triangle `(v1,v2,v3)` has 3 geometrically equivalent rotations that preserve winding order; the choice of rotation encodes 1 bit. The library automatically degrades gracefully when triangles are insufficient: first lowering repetition to 1×, then truncating payload, and silently skipping if even the 11-byte frame header doesn't fit.
+
+A separate L2 watermark (fixed 12-byte ZIP extra field in model entry local headers) is always written as a library fingerprint and requires no configuration.
+
+## Watermark Detection (`watermark.h`)
+
+| Function | Description |
+|----------|-------------|
+| `DetectWatermark(data, key)` | Detect L2 signature and decode L1 payload from a 3MF buffer. `data` is `std::span<const uint8_t>`. Returns `WatermarkResult` |
+| `HasL2Signature(data)` | Fast L2-only detection: binary scan for 12-byte library fingerprint. O(n), no XML parsing |
+
+### WatermarkResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `has_l2_signature` | `bool` | ZIP extra field library fingerprint detected |
+| `has_l1_payload` | `bool` | L1 payload successfully decoded |
+| `payload_truncated` | `bool` | Payload was truncated during encoding (partial data) |
+| `payload` | `vector<uint8_t>` | Decoded payload bytes (empty if `has_l1_payload` is false) |
+
+Decoding uses **canonical triangle ordering** (lexicographically smallest cyclic permutation of vertex indices) to recover watermark bits without needing the original mesh data. The decoder parses the 3MF ZIP, extracts model XML entries, scans `<triangle>` tags for vertex indices, and reverses the rotation encoding. Production mode (multiple model files) is handled by sorting entries by numeric suffix and concatenating triangles.
 
 ## Error Types (`error.h`)
 

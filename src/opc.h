@@ -7,10 +7,13 @@
 
 #include "internal/omp_config.h"
 #include "internal/opc_types.h"
+#include "internal/watermark.h"
 #include "internal/xml_stream_buffer.h"
 #include "internal/xml_util.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -59,11 +62,16 @@ std::vector<OpcPart> BuildOpcParts(const Document &doc);
 
 enum class MeshXmlFormat { FlatModel, ObjectsModel };
 
+/// Cyclic rotation map: kTriRotation[rot][pos] gives the index into {v1,v2,v3}.
+/// rot=0 → identity, rot=1 → (v2,v3,v1), preserving CCW winding.
+inline constexpr uint8_t kTriRotation[3][3] = {{0, 1, 2}, {1, 2, 0}, {2, 0, 1}};
+
 /// Stream mesh data as XML fragments to a sink callback (zero-allocation hot path).
-/// The sink is a template parameter to enable inlining (avoids std::function overhead).
+/// rotation_table: per-triangle rotation (0 or 1); empty = no rotation.
+/// tri_offset: starting index into rotation_table for the first object in doc.
 template <typename Sink>
 void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, int vertex_precision,
-                   Sink &&sink) {
+                   std::span<const uint8_t> rotation_table, std::size_t tri_offset, Sink &&sink) {
     XmlStreamBuffer<std::remove_reference_t<Sink>> buf(sink, vertex_precision);
 
     const std::string_view i2 = compact ? "" : "  ";
@@ -150,6 +158,7 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, int 
     }
 
     // -- Objects (hot path: zero heap allocations per vertex/triangle) --
+    std::size_t obj_tri_base = tri_offset;
     for (const auto &obj : doc.objects) {
         buf.Append(i4);
         buf.Append("<object id=\"");
@@ -270,29 +279,41 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, int 
                 std::size_t est = static_cast<std::size_t>(nt / max_threads + 1) * 100;
                 for (auto &tb : tbufs) { tb.reserve(est); }
 
+                const bool has_rot = !rotation_table.empty();
 #pragma omp parallel for schedule(static)
                 for (std::ptrdiff_t ti = 0; ti < nt; ++ti) {
                     auto idx = static_cast<std::size_t>(ti);
                     auto &local = tbufs[omp_get_thread_num()];
                     const auto &tri = mesh.triangles[idx];
+
+                    uint32_t vi[3] = {tri.v1, tri.v2, tri.v3};
+                    uint8_t rot = 0;
+                    if (has_rot) {
+                        uint8_t canon = CanonicalRotation(vi[0], vi[1], vi[2]);
+                        rot =
+                            static_cast<uint8_t>((canon + rotation_table[obj_tri_base + idx]) % 3);
+                    }
+                    const auto *rm = kTriRotation[rot];
+
                     local += i10;
                     local += "<triangle v1=\"";
-                    AppendUint32(local, tri.v1);
+                    AppendUint32(local, vi[rm[0]]);
                     local += "\" v2=\"";
-                    AppendUint32(local, tri.v2);
+                    AppendUint32(local, vi[rm[1]]);
                     local += "\" v3=\"";
-                    AppendUint32(local, tri.v3);
+                    AppendUint32(local, vi[rm[2]]);
                     local += "\"";
                     if (has_props && idx < mesh.triangle_properties.size()) {
                         const auto &tp = mesh.triangle_properties[idx];
+                        uint32_t pi[3] = {tp.p1, tp.p2, tp.p3};
                         local += " pid=\"";
                         AppendUint32(local, tp.pid);
                         local += "\" p1=\"";
-                        AppendUint32(local, tp.p1);
+                        AppendUint32(local, pi[rm[0]]);
                         local += "\" p2=\"";
-                        AppendUint32(local, tp.p2);
+                        AppendUint32(local, pi[rm[1]]);
                         local += "\" p3=\"";
-                        AppendUint32(local, tp.p3);
+                        AppendUint32(local, pi[rm[2]]);
                         local += "\"";
                     }
                     local += "/>\n";
@@ -303,26 +324,37 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, int 
             } else
 #endif
             {
+                const bool has_rot = !rotation_table.empty();
                 for (std::size_t ti = 0; ti < mesh.triangles.size(); ++ti) {
                     const auto &tri = mesh.triangles[ti];
+
+                    uint32_t vi[3] = {tri.v1, tri.v2, tri.v3};
+                    uint8_t rot = 0;
+                    if (has_rot) {
+                        uint8_t canon = CanonicalRotation(vi[0], vi[1], vi[2]);
+                        rot = static_cast<uint8_t>((canon + rotation_table[obj_tri_base + ti]) % 3);
+                    }
+                    const auto *rm = kTriRotation[rot];
+
                     buf.Append(i10);
                     buf.Append("<triangle v1=\"");
-                    buf.AppendUint32(tri.v1);
+                    buf.AppendUint32(vi[rm[0]]);
                     buf.Append("\" v2=\"");
-                    buf.AppendUint32(tri.v2);
+                    buf.AppendUint32(vi[rm[1]]);
                     buf.Append("\" v3=\"");
-                    buf.AppendUint32(tri.v3);
+                    buf.AppendUint32(vi[rm[2]]);
                     buf.Append("\"");
                     if (has_props && ti < mesh.triangle_properties.size()) {
                         const auto &tp = mesh.triangle_properties[ti];
+                        uint32_t pi[3] = {tp.p1, tp.p2, tp.p3};
                         buf.Append(" pid=\"");
                         buf.AppendUint32(tp.pid);
                         buf.Append("\" p1=\"");
-                        buf.AppendUint32(tp.p1);
+                        buf.AppendUint32(pi[rm[0]]);
                         buf.Append("\" p2=\"");
-                        buf.AppendUint32(tp.p2);
+                        buf.AppendUint32(pi[rm[1]]);
                         buf.Append("\" p3=\"");
-                        buf.AppendUint32(tp.p3);
+                        buf.AppendUint32(pi[rm[2]]);
                         buf.Append("\"");
                     }
                     buf.Append("/>\n");
@@ -333,6 +365,7 @@ void StreamMeshXml(const Document &doc, MeshXmlFormat format, bool compact, int 
             buf.Append("</triangles>\n");
             buf.Append(i6);
             buf.Append("</mesh>\n");
+            obj_tri_base += mesh.triangles.size();
         } else if (!obj.components.empty()) {
             buf.Append(i6);
             buf.Append("<components>\n");

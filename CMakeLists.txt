@@ -51,7 +51,8 @@ add_library(neroued_3mf STATIC
     src/builder.cpp
     src/zip.cpp
     src/opc.cpp
-    src/writer.cpp)
+    src/writer.cpp
+    src/watermark_detect.cpp)
 
 add_library(neroued::3mf ALIAS neroued_3mf)
 
@@ -85,6 +86,19 @@ target_compile_options(neroued_3mf PRIVATE
     $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:RelWithDebInfo>>:-O2 -g>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
+# -- Tools -------------------------------------------------------------------
+option(N3MF_BUILD_TOOLS "Build CLI tools" ON)
+if(N3MF_BUILD_TOOLS)
+    add_executable(n3mf_detect tools/detect_watermark.cpp)
+    target_link_libraries(n3mf_detect PRIVATE neroued_3mf)
+
+    add_executable(n3mf_generate_test tools/generate_test_3mf.cpp)
+    target_link_libraries(n3mf_generate_test PRIVATE neroued_3mf)
+
+    set_target_properties(n3mf_detect n3mf_generate_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
 
 # -- Tests -------------------------------------------------------------------
 if(N3MF_BUILD_TESTS)
