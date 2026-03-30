@@ -1,9 +1,14 @@
 #include "neroued/3mf/builder.h"
 #include "neroued/3mf/error.h"
+#include "neroued/3mf/watermark.h"
 #include "neroued/3mf/writer.h"
+
+#include "internal/sha256.h"
+#include "internal/watermark.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -604,4 +609,413 @@ TEST(Writer, VertexPrecisionReducesSize) {
 TEST(Writer, VertexPrecisionDefault) {
     n3mf::WriteOptions opts;
     EXPECT_EQ(opts.vertex_precision, 9);
+}
+
+// -- SHA256 / HMAC-SHA256 tests --
+
+TEST(SHA256, EmptyInput) {
+    n3mf::detail::SHA256 h;
+    auto digest = h.Final();
+    // SHA-256("") = e3b0c442...
+    EXPECT_EQ(digest[0], 0xe3);
+    EXPECT_EQ(digest[1], 0xb0);
+    EXPECT_EQ(digest[2], 0xc4);
+    EXPECT_EQ(digest[3], 0x42);
+    EXPECT_EQ(digest[31], 0x55);
+}
+
+TEST(SHA256, Abc) {
+    n3mf::detail::SHA256 h;
+    const uint8_t msg[] = {'a', 'b', 'c'};
+    h.Update(msg, 3);
+    auto digest = h.Final();
+    // SHA-256("abc") = ba7816bf 8f01cfea ...
+    EXPECT_EQ(digest[0], 0xba);
+    EXPECT_EQ(digest[1], 0x78);
+    EXPECT_EQ(digest[2], 0x16);
+    EXPECT_EQ(digest[3], 0xbf);
+}
+
+TEST(HMAC_SHA256, KnownVector) {
+    // RFC 4231 test case 2: key="Jefe", data="what do ya want for nothing?"
+    const uint8_t key[] = {'J', 'e', 'f', 'e'};
+    const char *msg = "what do ya want for nothing?";
+    auto mac =
+        n3mf::detail::HmacSHA256(key, 4, reinterpret_cast<const uint8_t *>(msg), std::strlen(msg));
+    EXPECT_EQ(mac[0], 0x5b);
+    EXPECT_EQ(mac[1], 0xdc);
+    EXPECT_EQ(mac[2], 0xc1);
+    EXPECT_EQ(mac[3], 0x46);
+}
+
+// -- Watermark round-trip tests --
+
+TEST(Watermark, RoundTripBasic) {
+    std::vector<uint8_t> payload = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
+    std::vector<uint8_t> key = {0x01, 0x02, 0x03, 0x04};
+
+    auto table = n3mf::detail::BuildRotationTable(payload, key, 3, 10000);
+    ASSERT_FALSE(table.empty());
+    EXPECT_EQ(table.size(), 10000u);
+
+    for (uint8_t v : table) { EXPECT_LE(v, 1u); }
+
+    auto decoded = n3mf::detail::DecodePayload(key, table);
+    EXPECT_EQ(decoded, payload);
+}
+
+TEST(Watermark, RoundTripNoKey) {
+    std::vector<uint8_t> payload = {0xDE, 0xAD, 0xBE, 0xEF};
+    std::vector<uint8_t> key; // empty = no encryption
+
+    auto table = n3mf::detail::BuildRotationTable(payload, key, 3, 5000);
+    ASSERT_FALSE(table.empty());
+
+    auto decoded = n3mf::detail::DecodePayload(key, table);
+    EXPECT_EQ(decoded, payload);
+}
+
+TEST(Watermark, DegradationTo1x) {
+    std::vector<uint8_t> payload(20, 0xAB);
+    std::vector<uint8_t> key = {0xFF};
+    // 20 + 11 = 31 bytes = 248 bits. With 3x rep = 744 bits needed, but only 500 available.
+    // Should degrade to 1x (248 bits < 500).
+    auto table = n3mf::detail::BuildRotationTable(payload, key, 3, 500);
+    ASSERT_FALSE(table.empty());
+
+    auto decoded = n3mf::detail::DecodePayload(key, table);
+    EXPECT_EQ(decoded, payload);
+}
+
+TEST(Watermark, TruncationWhenTooFew) {
+    std::vector<uint8_t> payload(100, 0x42);
+    std::vector<uint8_t> key = {0x01};
+    // 100 + 11 = 111 bytes = 888 bits at 1x. Only 200 triangles = 200 bits available.
+    // header 11 bytes = 88 bits → payload 200/8 - 11 = 14 bytes (truncated).
+    auto table = n3mf::detail::BuildRotationTable(payload, key, 1, 200);
+    ASSERT_FALSE(table.empty());
+
+    auto decoded = n3mf::detail::DecodePayload(key, table);
+    ASSERT_FALSE(decoded.empty());
+    EXPECT_LT(decoded.size(), payload.size());
+    EXPECT_EQ(std::vector<uint8_t>(decoded.begin(), decoded.end()),
+              std::vector<uint8_t>(payload.begin(),
+                                   payload.begin() + static_cast<std::ptrdiff_t>(decoded.size())));
+}
+
+TEST(Watermark, TooFewTrianglesReturnsEmpty) {
+    std::vector<uint8_t> payload = {0x01};
+    std::vector<uint8_t> key = {0x01};
+    // 11 bytes overhead = 88 bits, but only 50 triangles.
+    auto table = n3mf::detail::BuildRotationTable(payload, key, 1, 50);
+    EXPECT_TRUE(table.empty());
+}
+
+TEST(Watermark, EmptyPayloadReturnsEmpty) {
+    std::vector<uint8_t> payload;
+    std::vector<uint8_t> key = {0x01};
+    auto table = n3mf::detail::BuildRotationTable(payload, key, 3, 10000);
+    EXPECT_TRUE(table.empty());
+}
+
+// -- Writer integration tests with watermark --
+
+namespace {
+n3mf::Document MakeLargeMeshDocument(std::size_t num_triangles) {
+    n3mf::Mesh mesh;
+    mesh.vertices.reserve(num_triangles + 2);
+    mesh.vertices.push_back({0, 0, 0});
+    mesh.vertices.push_back({1, 0, 0});
+    for (std::size_t i = 0; i < num_triangles; ++i) {
+        float y = static_cast<float>(i + 1);
+        mesh.vertices.push_back({0.5f, y, 0});
+    }
+    mesh.triangles.reserve(num_triangles);
+    for (std::size_t i = 0; i < num_triangles; ++i) {
+        mesh.triangles.push_back({0, 1, static_cast<uint32_t>(i + 2)});
+    }
+
+    n3mf::DocumentBuilder builder;
+    auto obj = builder.AddMeshObject("LargeMesh", std::move(mesh));
+    builder.AddBuildItem(obj);
+    return builder.Build();
+}
+} // namespace
+
+TEST(Writer, WatermarkDoesNotBreakOutput) {
+    auto doc = MakeLargeMeshDocument(1000);
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0x01, 0x02, 0x03, 0x04, 0x05};
+    opts.watermark.key = {0xAA, 0xBB, 0xCC};
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+    EXPECT_TRUE(HasZipMagic(buf));
+    EXPECT_TRUE(ContainsSubstring(buf, "<vertex"));
+    EXPECT_TRUE(ContainsSubstring(buf, "<triangle"));
+}
+
+TEST(Writer, WatermarkDisabledByDefault) {
+    auto doc = MakeSingleTriangleDocument();
+    n3mf::WriteOptions opts;
+    opts.deterministic = true;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+
+    auto buf1 = n3mf::WriteToBuffer(doc, opts);
+    auto buf2 = n3mf::WriteToBuffer(doc, opts);
+    EXPECT_EQ(buf1, buf2);
+}
+
+TEST(Writer, L2ExtraFieldInModelEntry) {
+    auto doc = MakeSingleTriangleDocument();
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    // L2 signature bytes: 33 4E 08 00 6E 65 72 6F 75 65 64 00
+    std::vector<uint8_t> sig = {0x33, 0x4E, 0x08, 0x00, 0x6E, 0x65,
+                                0x72, 0x6F, 0x75, 0x65, 0x64, 0x00};
+    auto it = std::search(buf.begin(), buf.end(), sig.begin(), sig.end());
+    EXPECT_NE(it, buf.end());
+}
+
+TEST(Writer, WatermarkWithTriangleProperties) {
+    n3mf::Mesh mesh;
+    mesh.vertices.reserve(102);
+    mesh.vertices.push_back({0, 0, 0});
+    mesh.vertices.push_back({1, 0, 0});
+    for (int i = 0; i < 100; ++i) { mesh.vertices.push_back({0.5f, static_cast<float>(i + 1), 0}); }
+    for (int i = 0; i < 100; ++i) {
+        mesh.triangles.push_back({0, 1, static_cast<uint32_t>(i + 2)});
+        mesh.triangle_properties.push_back({1, 0, static_cast<uint32_t>(i % 2), 0});
+    }
+
+    n3mf::DocumentBuilder builder;
+    builder.AddBaseMaterialGroup({{"Red", {255, 0, 0, 255}}, {"Blue", {0, 0, 255, 255}}});
+    auto obj = builder.AddMeshObject("Colored", std::move(mesh));
+    builder.AddBuildItem(obj);
+
+    auto doc = builder.Build();
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0x42};
+    opts.watermark.key = {0x01};
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+    EXPECT_TRUE(HasZipMagic(buf));
+    EXPECT_TRUE(ContainsSubstring(buf, "pid=\"1\""));
+}
+
+// -- CanonicalRotation unit tests --
+
+TEST(CanonicalRotation, Distinct) {
+    using n3mf::detail::CanonicalRotation;
+    // (5,3,7): canonical = (3,7,5) at rotation 1
+    EXPECT_EQ(CanonicalRotation(5, 3, 7), 1);
+    EXPECT_EQ(CanonicalRotation(3, 7, 5), 0);
+    EXPECT_EQ(CanonicalRotation(7, 5, 3), 2);
+}
+
+TEST(CanonicalRotation, TwoEqual) {
+    using n3mf::detail::CanonicalRotation;
+    // (3,3,7): canonical = (3,3,7) at rotation 0
+    EXPECT_EQ(CanonicalRotation(3, 3, 7), 0);
+    EXPECT_EQ(CanonicalRotation(3, 7, 3), 2);
+    EXPECT_EQ(CanonicalRotation(7, 3, 3), 1);
+}
+
+TEST(CanonicalRotation, AllEqual) {
+    using n3mf::detail::CanonicalRotation;
+    EXPECT_EQ(CanonicalRotation(5, 5, 5), 0);
+}
+
+// -- ScanTrianglesFromXml unit tests --
+
+TEST(ScanTriangles, BasicXml) {
+    std::string_view xml = R"(<?xml version="1.0"?>
+<model><resources><object id="1"><mesh>
+<vertices><vertex x="0" y="0" z="0"/></vertices>
+<triangles>
+  <triangle v1="0" v2="1" v3="2"/>
+  <triangle v1="3" v2="4" v3="5" pid="1" p1="0" p2="0" p3="0"/>
+</triangles>
+</mesh></object></resources></model>)";
+    auto tris = n3mf::detail::ScanTrianglesFromXml(xml);
+    ASSERT_EQ(tris.size(), 2u);
+    EXPECT_EQ(tris[0][0], 0u);
+    EXPECT_EQ(tris[0][1], 1u);
+    EXPECT_EQ(tris[0][2], 2u);
+    EXPECT_EQ(tris[1][0], 3u);
+    EXPECT_EQ(tris[1][1], 4u);
+    EXPECT_EQ(tris[1][2], 5u);
+}
+
+TEST(ScanTriangles, SkipsTrianglesTag) {
+    std::string_view xml = "<triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\"/></triangles>";
+    auto tris = n3mf::detail::ScanTrianglesFromXml(xml);
+    ASSERT_EQ(tris.size(), 1u);
+}
+
+// -- Watermark detection end-to-end tests --
+
+TEST(WatermarkDetect, RoundTripFlatModel) {
+    auto doc = MakeLargeMeshDocument(2000);
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
+    opts.watermark.key = {0xAA, 0xBB, 0xCC, 0xDD};
+    opts.watermark.repetition = 3;
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    auto result = n3mf::DetectWatermark(buf, opts.watermark.key);
+    EXPECT_TRUE(result.has_l2_signature);
+    EXPECT_TRUE(result.has_l1_payload);
+    EXPECT_FALSE(result.payload_truncated);
+    EXPECT_EQ(result.payload, opts.watermark.payload);
+}
+
+TEST(WatermarkDetect, RoundTripDeflate) {
+    auto doc = MakeLargeMeshDocument(2000);
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Deflate;
+    opts.watermark.payload = {0xDE, 0xAD};
+    opts.watermark.key = {0x01, 0x02};
+    opts.watermark.repetition = 1;
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    auto result = n3mf::DetectWatermark(buf, opts.watermark.key);
+    EXPECT_TRUE(result.has_l2_signature);
+    EXPECT_TRUE(result.has_l1_payload);
+    EXPECT_EQ(result.payload, opts.watermark.payload);
+}
+
+TEST(WatermarkDetect, RoundTripNoKey) {
+    auto doc = MakeLargeMeshDocument(2000);
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0x42, 0x43, 0x44};
+    opts.watermark.key = {};
+    opts.watermark.repetition = 3;
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    auto result = n3mf::DetectWatermark(buf, {});
+    EXPECT_TRUE(result.has_l1_payload);
+    EXPECT_EQ(result.payload, opts.watermark.payload);
+}
+
+TEST(WatermarkDetect, L2OnlyNoWatermark) {
+    auto doc = MakeSingleTriangleDocument();
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    EXPECT_TRUE(n3mf::HasL2Signature(buf));
+
+    auto result = n3mf::DetectWatermark(buf, {0x01});
+    EXPECT_TRUE(result.has_l2_signature);
+    EXPECT_FALSE(result.has_l1_payload);
+    EXPECT_TRUE(result.payload.empty());
+}
+
+TEST(WatermarkDetect, WrongKeyFailsDecode) {
+    auto doc = MakeLargeMeshDocument(2000);
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0x01, 0x02, 0x03};
+    opts.watermark.key = {0xAA, 0xBB};
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    auto result = n3mf::DetectWatermark(buf, {0xFF, 0xEE});
+    EXPECT_TRUE(result.has_l2_signature);
+    EXPECT_FALSE(result.has_l1_payload);
+}
+
+TEST(WatermarkDetect, ProductionModePerObject) {
+    n3mf::DocumentBuilder builder;
+    builder.EnableProduction();
+
+    for (int i = 0; i < 3; ++i) {
+        n3mf::Mesh mesh;
+        float offset = static_cast<float>(i * 20);
+        mesh.vertices.reserve(502);
+        mesh.vertices.push_back({offset, 0, 0});
+        mesh.vertices.push_back({offset + 1, 0, 0});
+        for (int j = 0; j < 500; ++j) {
+            mesh.vertices.push_back({offset + 0.5f, static_cast<float>(j + 1), 0});
+        }
+        mesh.triangles.reserve(500);
+        for (int j = 0; j < 500; ++j) {
+            mesh.triangles.push_back({0, 1, static_cast<uint32_t>(j + 2)});
+        }
+        auto obj = builder.AddMeshObject("Part_" + std::to_string(i), std::move(mesh));
+        builder.AddBuildItem(obj);
+    }
+
+    auto doc = builder.Build();
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0xCA, 0xFE};
+    opts.watermark.key = {0x11, 0x22, 0x33};
+    opts.watermark.repetition = 3;
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    auto result = n3mf::DetectWatermark(buf, opts.watermark.key);
+    EXPECT_TRUE(result.has_l2_signature);
+    EXPECT_TRUE(result.has_l1_payload);
+    EXPECT_EQ(result.payload, opts.watermark.payload);
+}
+
+TEST(WatermarkDetect, ProductionModeMerged) {
+    n3mf::DocumentBuilder builder;
+    builder.EnableProduction().SetProductionMergeObjects(true);
+
+    for (int i = 0; i < 2; ++i) {
+        n3mf::Mesh mesh;
+        float offset = static_cast<float>(i * 20);
+        mesh.vertices.reserve(502);
+        mesh.vertices.push_back({offset, 0, 0});
+        mesh.vertices.push_back({offset + 1, 0, 0});
+        for (int j = 0; j < 500; ++j) {
+            mesh.vertices.push_back({offset + 0.5f, static_cast<float>(j + 1), 0});
+        }
+        mesh.triangles.reserve(500);
+        for (int j = 0; j < 500; ++j) {
+            mesh.triangles.push_back({0, 1, static_cast<uint32_t>(j + 2)});
+        }
+        auto obj = builder.AddMeshObject("Part_" + std::to_string(i), std::move(mesh));
+        builder.AddBuildItem(obj);
+    }
+
+    auto doc = builder.Build();
+    n3mf::WriteOptions opts;
+    opts.compression = n3mf::WriteOptions::Compression::Store;
+    opts.watermark.payload = {0xBE, 0xEF};
+    opts.watermark.key = {0x44, 0x55};
+
+    auto buf = n3mf::WriteToBuffer(doc, opts);
+
+    auto result = n3mf::DetectWatermark(buf, opts.watermark.key);
+    EXPECT_TRUE(result.has_l2_signature);
+    EXPECT_TRUE(result.has_l1_payload);
+    EXPECT_EQ(result.payload, opts.watermark.payload);
+}
+
+TEST(WatermarkDetect, HasL2SignatureOnNonLibraryData) {
+    std::vector<uint8_t> fake_zip = {0x50, 0x4B, 0x03, 0x04, 0x00, 0x00};
+    EXPECT_FALSE(n3mf::HasL2Signature(fake_zip));
+}
+
+TEST(WatermarkDetect, EmptyBufferReturnsFalse) {
+    std::vector<uint8_t> empty;
+    EXPECT_FALSE(n3mf::HasL2Signature(empty));
+
+    auto result = n3mf::DetectWatermark(empty, {});
+    EXPECT_FALSE(result.has_l2_signature);
+    EXPECT_FALSE(result.has_l1_payload);
 }

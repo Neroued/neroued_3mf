@@ -6,6 +6,7 @@
 #include "neroued/3mf/error.h"
 
 #include "internal/validate.h"
+#include "internal/watermark.h"
 #include "opc.h"
 #include "zip.h"
 
@@ -101,6 +102,15 @@ void WriteAllEntries(detail::StreamingZipWriter &zip, const Document &doc,
         zip.WriteWholeEntry(part.path_in_zip, std::span<const uint8_t>(part.data));
     }
 
+    std::vector<uint8_t> rotation_table;
+    if (!opts.watermark.payload.empty()) {
+        std::size_t total_tri = 0;
+        for (const auto &obj : doc.objects) { total_tri += obj.mesh.triangles.size(); }
+        rotation_table = detail::BuildRotationTable(opts.watermark.payload, opts.watermark.key,
+                                                    opts.watermark.repetition, total_tri);
+    }
+    std::span<const uint8_t> rt(rotation_table);
+
     auto zip_sink = [&](std::string_view chunk) { zip.WriteChunk(chunk.data(), chunk.size()); };
 
     if (doc.production.enabled) {
@@ -114,9 +124,10 @@ void WriteAllEntries(detail::StreamingZipWriter &zip, const Document &doc,
 
             zip.BeginDeflateEntry("3D/Objects/object_1.model");
             detail::StreamMeshXml(merged_doc, detail::MeshXmlFormat::ObjectsModel, opts.compact_xml,
-                                  opts.vertex_precision, zip_sink);
+                                  opts.vertex_precision, rt, 0, zip_sink);
             zip.EndEntry();
         } else {
+            std::size_t tri_offset = 0;
             for (std::size_t i = 0; i < doc.objects.size(); ++i) {
                 std::string ext_path = "3D/Objects/object_" + std::to_string(i + 1) + ".model";
 
@@ -129,14 +140,16 @@ void WriteAllEntries(detail::StreamingZipWriter &zip, const Document &doc,
 
                 zip.BeginDeflateEntry(ext_path);
                 detail::StreamMeshXml(single_doc, detail::MeshXmlFormat::ObjectsModel,
-                                      opts.compact_xml, opts.vertex_precision, zip_sink);
+                                      opts.compact_xml, opts.vertex_precision, rt, tri_offset,
+                                      zip_sink);
                 zip.EndEntry();
+                tri_offset += doc.objects[i].mesh.triangles.size();
             }
         }
     } else {
         zip.BeginDeflateEntry("3D/3dmodel.model");
         detail::StreamMeshXml(doc, detail::MeshXmlFormat::FlatModel, opts.compact_xml,
-                              opts.vertex_precision, zip_sink);
+                              opts.vertex_precision, rt, 0, zip_sink);
         zip.EndEntry();
     }
 

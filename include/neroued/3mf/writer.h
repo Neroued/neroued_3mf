@@ -16,6 +16,17 @@
 
 namespace neroued_3mf {
 
+/// Configuration for L1 triangle-rotation watermark.
+/// When payload is non-empty, the library encodes it into the cyclic ordering of triangle indices
+/// (geometrically equivalent, invisible to 3MF readers). The key encrypts the payload via
+/// XOR with an HMAC-SHA256 counter-mode keystream; without the key the rotations are
+/// statistically indistinguishable from random.
+struct WatermarkConfig {
+    std::vector<uint8_t> payload; ///< Data to embed. Empty = no L1 watermark.
+    std::vector<uint8_t> key;     ///< Encryption key. Empty = unencrypted (payload readable).
+    int repetition = 3; ///< Redundancy factor: 1, 3, or 5 (majority-vote error correction).
+};
+
 struct WriteOptions {
     enum class Compression { Store, Deflate, Auto } compression = Compression::Auto;
     std::size_t compression_threshold = 16 * 1024;
@@ -28,6 +39,8 @@ struct WriteOptions {
     /// Lower values reduce XML size at the cost of geometric precision.
     /// Transform matrices always use full precision regardless of this setting.
     int vertex_precision = 9;
+    /// L1 watermark configuration. Default (empty payload) = disabled.
+    WatermarkConfig watermark;
 };
 
 /// Write a Document to an in-memory buffer.

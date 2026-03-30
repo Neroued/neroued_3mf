@@ -38,6 +38,19 @@ constexpr uint16_t kCompressionMethodStore = 0u;
 constexpr uint16_t kCompressionMethodDeflate = 8u;
 constexpr uint16_t kFlagDataDescriptor = 0x0008u;
 
+// L2 library fingerprint: fixed extra field written in model entry local headers.
+// Header ID 0x4E33 ("N3") is not in APPNOTE's registered ID list.
+constexpr uint8_t kLibExtraField[] = {
+    0x33, 0x4E,                                    // Header ID: 0x4E33 (LE)
+    0x08, 0x00,                                    // Data Size: 8 (LE)
+    0x6E, 0x65, 0x72, 0x6F, 0x75, 0x65, 0x64, 0x00 // "neroued\0"
+};
+
+bool IsModelEntry(const std::string &path) {
+    return path == "3D/3dmodel.model" ||
+           (path.starts_with("3D/Objects/") && path.ends_with(".model"));
+}
+
 struct CentralDirEntry {
     std::string file_name;
     uint16_t compression_method = 0;
@@ -351,7 +364,8 @@ struct StreamingZipWriter::Impl {
     // -- Header writing --
 
     void WriteLocalHeader(const std::string &name, uint16_t compression_method, uint16_t flags,
-                          uint32_t crc, uint32_t compressed_size, uint32_t uncompressed_size) {
+                          uint32_t crc, uint32_t compressed_size, uint32_t uncompressed_size,
+                          const uint8_t *extra = nullptr, uint16_t extra_len = 0) {
         SinkAppendU32(kLocalFileHeaderSignature);
         SinkAppendU16(kZipVersionNeeded);
         SinkAppendU16(flags);
@@ -362,8 +376,9 @@ struct StreamingZipWriter::Impl {
         SinkAppendU32(compressed_size);
         SinkAppendU32(uncompressed_size);
         SinkAppendU16(static_cast<uint16_t>(name.size()));
-        SinkAppendU16(0u);
+        SinkAppendU16(extra_len);
         SinkAppendBytes(name.data(), name.size());
+        if (extra_len > 0 && extra != nullptr) { SinkAppendBytes(extra, extra_len); }
     }
 
     void WriteDataDescriptor(uint32_t crc, uint64_t compressed, uint64_t uncompressed) {
@@ -502,9 +517,16 @@ void StreamingZipWriter::WriteWholeEntry(const std::string &path, std::span<cons
     entry.mod_time = impl_->dos_time;
     entry.mod_date = impl_->dos_date;
 
+    const uint8_t *extra = nullptr;
+    uint16_t extra_len = 0;
+    if (IsModelEntry(path)) {
+        extra = kLibExtraField;
+        extra_len = static_cast<uint16_t>(sizeof(kLibExtraField));
+    }
+
     impl_->WriteLocalHeader(path, compression_method, 0, entry.crc32,
                             static_cast<uint32_t>(entry.compressed_size),
-                            static_cast<uint32_t>(entry.uncompressed_size));
+                            static_cast<uint32_t>(entry.uncompressed_size), extra, extra_len);
     impl_->SinkAppendBytes(payload_data, payload_size);
     impl_->central_entries.push_back(std::move(entry));
 }
@@ -539,8 +561,16 @@ void StreamingZipWriter::BeginDeflateEntry(const std::string &path) {
     }
 #endif
 
+    const uint8_t *extra = nullptr;
+    uint16_t extra_len = 0;
+    if (IsModelEntry(path)) {
+        extra = kLibExtraField;
+        extra_len = static_cast<uint16_t>(sizeof(kLibExtraField));
+    }
+
     impl_->stream_local_header_offset = static_cast<uint64_t>(impl_->SinkSize());
-    impl_->WriteLocalHeader(path, compression_method, kFlagDataDescriptor, 0, 0, 0);
+    impl_->WriteLocalHeader(path, compression_method, kFlagDataDescriptor, 0, 0, 0, extra,
+                            extra_len);
     impl_->stream_data_start = impl_->SinkSize();
 }
 
