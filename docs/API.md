@@ -148,6 +148,18 @@ A separate L2 watermark (fixed 12-byte ZIP extra field in model entry local head
 
 Decoding uses **canonical triangle ordering** (lexicographically smallest cyclic permutation of vertex indices) to recover watermark bits without needing the original mesh data. The decoder parses the 3MF ZIP, extracts model XML entries, scans `<triangle>` tags for vertex indices, and reverses the rotation encoding. Production mode (multiple model files) is handled by sorting entries by numeric suffix and concatenating triangles.
 
+### Python Bindings
+
+All watermark types and functions are available in Python. `vector<uint8_t>` fields are exposed as `bytes`:
+
+| C++ | Python |
+|-----|--------|
+| `WatermarkConfig` | `WatermarkConfig(payload=b"", key=b"", repetition=3)` |
+| `WatermarkResult.payload` | `bytes` (read-only) |
+| `DetectWatermark(data, key)` | `detect_watermark(data: bytes, key: bytes = b"") -> WatermarkResult` |
+| `HasL2Signature(data)` | `has_l2_signature(data: bytes) -> bool` |
+| `WriteOptions.watermark` | `WatermarkConfig` (read-write) |
+
 ## Error Types (`error.h`)
 
 | Type | Description |

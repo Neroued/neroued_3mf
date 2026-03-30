@@ -166,6 +166,62 @@ n3mf.write_to_file("output.3mf", doc)
 
 For zero-copy with matching dtypes (float32 vertices, uint32 triangles), no conversion is performed — data is memcpy'd directly.
 
+## Watermark: Embed and Detect
+
+### C++: Embed watermark during write
+
+```cpp
+#include <neroued/3mf/neroued_3mf.h>
+
+auto doc = builder.Build();
+
+neroued_3mf::WriteOptions opts;
+opts.watermark.payload = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
+opts.watermark.key = {0x73, 0x65, 0x63, 0x72, 0x65, 0x74}; // "secret"
+opts.watermark.repetition = 3; // 3x majority-vote redundancy
+neroued_3mf::WriteToFile("watermarked.3mf", doc, opts);
+```
+
+### C++: Detect watermark from a 3MF file
+
+```cpp
+#include <neroued/3mf/watermark.h>
+
+std::vector<uint8_t> data = /* read file into memory */;
+std::vector<uint8_t> key = {0x73, 0x65, 0x63, 0x72, 0x65, 0x74};
+
+auto result = neroued_3mf::DetectWatermark(data, key);
+if (result.has_l2_signature) { /* Library fingerprint found */ }
+if (result.has_l1_payload)  { /* result.payload contains decoded bytes */ }
+
+// Fast L2-only check (no XML parsing)
+bool from_lib = neroued_3mf::HasL2Signature(data);
+```
+
+### Python: Embed and detect watermark
+
+```python
+import neroued_3mf as n3mf
+
+# Embed
+opts = n3mf.WriteOptions()
+opts.watermark = n3mf.WatermarkConfig(
+    payload=b"Hello",
+    key=b"secret",
+    repetition=3,
+)
+buf = n3mf.write_to_buffer(doc, opts)
+
+# Detect
+result = n3mf.detect_watermark(buf, key=b"secret")
+print(result.has_l2_signature)  # True
+print(result.has_l1_payload)    # True
+print(result.payload)           # b"Hello"
+
+# Fast L2-only check
+print(n3mf.has_l2_signature(buf))  # True
+```
+
 ## Write Options
 
 ### Compression Control
