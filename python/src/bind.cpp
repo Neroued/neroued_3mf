@@ -440,6 +440,67 @@ NB_MODULE(_neroued_3mf, m) {
                    ", build_items=" + std::to_string(doc.build_items.size()) + ")";
         });
 
+    // ---- WatermarkConfig ----------------------------------------------------
+
+    nb::class_<n3mf::WatermarkConfig>(m, "WatermarkConfig")
+        .def(
+            "__init__",
+            [](n3mf::WatermarkConfig *self, nb::bytes payload, nb::bytes key, int repetition) {
+                auto to_vec = [](nb::bytes b) {
+                    auto ptr = reinterpret_cast<const uint8_t *>(b.c_str());
+                    return std::vector<uint8_t>(ptr, ptr + b.size());
+                };
+                new (self) n3mf::WatermarkConfig{to_vec(payload), to_vec(key), repetition};
+            },
+            "payload"_a = nb::bytes(nullptr, 0), "key"_a = nb::bytes(nullptr, 0),
+            "repetition"_a = 3)
+        .def_prop_rw(
+            "payload",
+            [](const n3mf::WatermarkConfig &c) {
+                return nb::bytes(reinterpret_cast<const char *>(c.payload.data()),
+                                 c.payload.size());
+            },
+            [](n3mf::WatermarkConfig &c, nb::bytes v) {
+                auto ptr = reinterpret_cast<const uint8_t *>(v.c_str());
+                c.payload.assign(ptr, ptr + v.size());
+            })
+        .def_prop_rw(
+            "key",
+            [](const n3mf::WatermarkConfig &c) {
+                return nb::bytes(reinterpret_cast<const char *>(c.key.data()), c.key.size());
+            },
+            [](n3mf::WatermarkConfig &c, nb::bytes v) {
+                auto ptr = reinterpret_cast<const uint8_t *>(v.c_str());
+                c.key.assign(ptr, ptr + v.size());
+            })
+        .def_rw("repetition", &n3mf::WatermarkConfig::repetition)
+        .def("__repr__", [](const n3mf::WatermarkConfig &c) {
+            return "WatermarkConfig(payload=" + std::to_string(c.payload.size()) +
+                   "B, key=" + std::to_string(c.key.size()) +
+                   "B, repetition=" + std::to_string(c.repetition) + ")";
+        });
+
+    // ---- WatermarkResult ----------------------------------------------------
+
+    nb::class_<n3mf::WatermarkResult>(m, "WatermarkResult")
+        .def(nb::init<>())
+        .def_ro("has_l2_signature", &n3mf::WatermarkResult::has_l2_signature)
+        .def_ro("has_l1_payload", &n3mf::WatermarkResult::has_l1_payload)
+        .def_ro("payload_truncated", &n3mf::WatermarkResult::payload_truncated)
+        .def_prop_ro("payload",
+                     [](const n3mf::WatermarkResult &r) {
+                         return nb::bytes(reinterpret_cast<const char *>(r.payload.data()),
+                                          r.payload.size());
+                     })
+        .def("__repr__", [](const n3mf::WatermarkResult &r) {
+            std::string s = "WatermarkResult(l2=" + std::string(r.has_l2_signature ? "yes" : "no") +
+                            ", l1=" + std::string(r.has_l1_payload ? "yes" : "no");
+            if (r.has_l1_payload) s += ", payload=" + std::to_string(r.payload.size()) + "B";
+            if (r.payload_truncated) s += ", truncated";
+            s += ")";
+            return s;
+        });
+
     // ---- WriteOptions ------------------------------------------------------
 
     auto wo = nb::class_<n3mf::WriteOptions>(m, "WriteOptions");
@@ -455,7 +516,11 @@ NB_MODULE(_neroued_3mf, m) {
         .def_rw("deflate_level", &n3mf::WriteOptions::deflate_level)
         .def_rw("deterministic", &n3mf::WriteOptions::deterministic)
         .def_rw("compact_xml", &n3mf::WriteOptions::compact_xml)
-        .def_rw("vertex_precision", &n3mf::WriteOptions::vertex_precision);
+        .def_rw("vertex_precision", &n3mf::WriteOptions::vertex_precision)
+        .def_prop_rw(
+            "watermark",
+            [](const n3mf::WriteOptions &o) -> n3mf::WatermarkConfig { return o.watermark; },
+            [](n3mf::WriteOptions &o, n3mf::WatermarkConfig wm) { o.watermark = std::move(wm); });
 
     // ---- DocumentBuilder ---------------------------------------------------
 
@@ -546,4 +611,29 @@ NB_MODULE(_neroued_3mf, m) {
         "doc"_a, "opts"_a = n3mf::WriteOptions{});
 
     m.def("write_to_file", &n3mf::WriteToFile, "path"_a, "doc"_a, "opts"_a = n3mf::WriteOptions{});
+
+    // ---- Watermark detection ------------------------------------------------
+
+    m.def(
+        "detect_watermark",
+        [](nb::bytes data, nb::bytes key) {
+            auto d = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(data.c_str()),
+                                              data.size());
+            std::vector<uint8_t> k;
+            if (key.size() > 0) {
+                auto kp = reinterpret_cast<const uint8_t *>(key.c_str());
+                k.assign(kp, kp + key.size());
+            }
+            return n3mf::DetectWatermark(d, k);
+        },
+        "data"_a, "key"_a = nb::bytes(nullptr, 0));
+
+    m.def(
+        "has_l2_signature",
+        [](nb::bytes data) {
+            auto d = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(data.c_str()),
+                                              data.size());
+            return n3mf::HasL2Signature(d);
+        },
+        "data"_a);
 }

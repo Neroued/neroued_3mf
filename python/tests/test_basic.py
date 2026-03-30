@@ -258,6 +258,14 @@ class TestWriteOptions:
         assert opts.compact_xml is False
         assert opts.vertex_precision == 9
 
+    def test_watermark_config_on_write_options(self):
+        opts = n3mf.WriteOptions()
+        wm = n3mf.WatermarkConfig(payload=b"hello", key=b"secret", repetition=3)
+        opts.watermark = wm
+        assert opts.watermark.payload == b"hello"
+        assert opts.watermark.key == b"secret"
+        assert opts.watermark.repetition == 3
+
     def test_vertex_precision_reduces_size(self):
         mesh = n3mf.Mesh()
         mesh.vertices = [
@@ -386,3 +394,107 @@ class TestMeshFromArrays:
         mesh = n3mf.Mesh.from_arrays(verts, faces)
         assert mesh.vertices[0].x == pytest.approx(1.23456789, rel=1e-6)
         assert mesh.vertices[0].y == pytest.approx(2.34567890, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Watermark
+# ---------------------------------------------------------------------------
+
+class TestWatermarkConfig:
+    def test_defaults(self):
+        wm = n3mf.WatermarkConfig()
+        assert wm.payload == b""
+        assert wm.key == b""
+        assert wm.repetition == 3
+
+    def test_construction(self):
+        wm = n3mf.WatermarkConfig(payload=b"\x01\x02", key=b"\xaa\xbb", repetition=5)
+        assert wm.payload == b"\x01\x02"
+        assert wm.key == b"\xaa\xbb"
+        assert wm.repetition == 5
+
+    def test_mutable(self):
+        wm = n3mf.WatermarkConfig()
+        wm.payload = b"test"
+        wm.key = b"key"
+        wm.repetition = 1
+        assert wm.payload == b"test"
+        assert wm.key == b"key"
+        assert wm.repetition == 1
+
+    def test_repr(self):
+        wm = n3mf.WatermarkConfig(payload=b"ab")
+        assert "WatermarkConfig" in repr(wm)
+
+
+class TestWatermarkResult:
+    def test_default(self):
+        r = n3mf.WatermarkResult()
+        assert r.has_l2_signature is False
+        assert r.has_l1_payload is False
+        assert r.payload_truncated is False
+        assert r.payload == b""
+
+    def test_repr(self):
+        r = n3mf.WatermarkResult()
+        assert "WatermarkResult" in repr(r)
+
+
+class TestWatermarkDetection:
+    @staticmethod
+    def _make_watermarked_3mf(payload=b"hello", key=b"secret"):
+        """Write a 3MF with enough triangles and a watermark."""
+        mesh = n3mf.Mesh()
+        verts = []
+        tris = []
+        for i in range(1000):
+            base = i * 3
+            verts.extend([
+                n3mf.Vec3f(float(i), 0.0, 0.0),
+                n3mf.Vec3f(float(i) + 1.0, 0.0, 0.0),
+                n3mf.Vec3f(float(i) + 0.5, 1.0, 0.0),
+            ])
+            tris.append(n3mf.IndexTriangle(base, base + 1, base + 2))
+        mesh.vertices = verts
+        mesh.triangles = tris
+
+        builder = n3mf.DocumentBuilder()
+        builder.set_unit(n3mf.Unit.Millimeter)
+        obj_id = builder.add_mesh_object("Part", mesh)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+
+        opts = n3mf.WriteOptions()
+        opts.watermark = n3mf.WatermarkConfig(payload=payload, key=key)
+        return n3mf.write_to_buffer(doc, opts)
+
+    def test_roundtrip(self):
+        buf = self._make_watermarked_3mf()
+        result = n3mf.detect_watermark(buf, key=b"secret")
+        assert result.has_l2_signature is True
+        assert result.has_l1_payload is True
+        assert result.payload == b"hello"
+
+    def test_l2_signature(self):
+        buf = self._make_watermarked_3mf()
+        assert n3mf.has_l2_signature(buf) is True
+
+    def test_no_watermark(self):
+        doc = make_simple_document()
+        buf = n3mf.write_to_buffer(doc)
+        assert n3mf.has_l2_signature(buf) is True
+        result = n3mf.detect_watermark(buf)
+        assert result.has_l2_signature is True
+        assert result.has_l1_payload is False
+
+    def test_wrong_key(self):
+        buf = self._make_watermarked_3mf(key=b"correct")
+        result = n3mf.detect_watermark(buf, key=b"wrong")
+        assert result.has_l2_signature is True
+        assert result.payload != b"hello"
+
+    def test_empty_data(self):
+        assert n3mf.has_l2_signature(b"") is False
+        result = n3mf.detect_watermark(b"")
+        assert result.has_l2_signature is False
+        assert result.has_l1_payload is False
