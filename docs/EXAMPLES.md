@@ -27,19 +27,37 @@ neroued_3mf::WriteToFile("output.3mf", doc);
 
 ## Zero-copy with MeshView
 
-When your mesh data already lives in external buffers (e.g. from a meshing library), use `MeshView` to avoid copying:
+When your mesh data already lives in external buffers, use `MeshView` to avoid copying. The helper functions `AsVertexSpan` / `AsTriangleSpan` convert layout-compatible data (raw `float*` / `uint32_t*` or custom structs) into the spans that `MeshView` expects:
 
 ```cpp
-std::vector<neroued_3mf::Vec3f> vertices = /* ... from meshing library ... */;
-std::vector<neroued_3mf::IndexTriangle> indices = /* ... */;
+// Scenario 1: Raw float*/uint32_t* from a C API or flat buffer
+float *raw_verts = /* ... */;
+uint32_t *raw_idx = /* ... */;
+neroued_3mf::MeshView view{
+    neroued_3mf::AsVertexSpan(raw_verts, vert_count),
+    neroued_3mf::AsTriangleSpan(raw_idx, tri_count),
+    {}
+};
 
-neroued_3mf::MeshView view{vertices, indices, {}};
+// Scenario 2: Layout-compatible custom struct array
+struct MyVec3 { float x, y, z; };
+std::vector<MyVec3> my_verts = /* ... */;
+neroued_3mf::MeshView view2{
+    neroued_3mf::AsVertexSpan(my_verts.data(), my_verts.size()),
+    neroued_3mf::AsTriangleSpan(raw_idx, tri_count),
+    {}
+};
+
+// Scenario 3: std::vector<Vec3f> / std::vector<IndexTriangle> — implicit span
+std::vector<neroued_3mf::Vec3f> vertices = /* ... */;
+std::vector<neroued_3mf::IndexTriangle> indices = /* ... */;
+neroued_3mf::MeshView view3{vertices, indices, {}};
+
 auto obj = builder.AddMeshObject("External", view);
 builder.AddBuildItem(obj);
-
 auto doc = builder.Build();
 auto buffer = neroued_3mf::WriteToBuffer(doc);
-// Caller must keep vertices/indices alive until Write* returns.
+// Caller must keep vertex/index data alive until Write* returns.
 ```
 
 ## Assembly with Core Components
@@ -140,31 +158,40 @@ neroued_3mf::WriteToFile("bambu_project.3mf", doc);
 
 ## Python: NumPy Array Input
 
-`Mesh.from_arrays()` accepts NumPy arrays directly, avoiding per-element Python object overhead. Accepts float32/float64 vertices and uint32/int32/int64 triangles (C-contiguous).
+`add_mesh_object()` accepts NumPy arrays directly as an alternative to a `Mesh` object. When dtypes match the internal format (float32 + uint32/int32), data is referenced **zero-copy**; otherwise an efficient single-step conversion is performed.
 
 ```python
 import numpy as np
 import neroued_3mf as n3mf
 
-# Typical trimesh workflow
-import trimesh
-tm = trimesh.load("model.stl")
-
-mesh = n3mf.Mesh.from_arrays(
-    vertices=tm.vertices,   # (N, 3) float64 → auto-converted to float32
-    triangles=tm.faces,     # (M, 3) int64   → auto-converted to uint32
-)
-
 builder = n3mf.DocumentBuilder()
 builder.set_unit(n3mf.Unit.Millimeter)
-obj = builder.add_mesh_object("Part", mesh)
+
+# Approach 1: Pass NumPy arrays directly (recommended for most workflows)
+# trimesh example (float64 + int64 → fast internal conversion)
+import trimesh
+tm = trimesh.load("model.stl")
+obj = builder.add_mesh_object("Part", tm.vertices, tm.faces)
 builder.add_build_item(obj)
+
+# High-perf workflow (float32 + uint32 → true zero-copy, no data copy at all)
+verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+tris = np.array([[0, 1, 2]], dtype=np.uint32)
+obj2 = builder.add_mesh_object("Part2", verts, tris)
+builder.add_build_item(obj2)
 
 doc = builder.build()
 n3mf.write_to_file("output.3mf", doc)
 ```
 
-For zero-copy with matching dtypes (float32 vertices, uint32 triangles), no conversion is performed — data is memcpy'd directly.
+`Mesh.from_arrays()` is still available for creating standalone `Mesh` objects when you need to inspect, validate, or manipulate the mesh before adding it:
+
+```python
+mesh = n3mf.Mesh.from_arrays(verts_f64, tris_i64)
+mesh.remove_degenerate_triangles()
+bb = mesh.compute_bounding_box()
+obj = builder.add_mesh_object("Part", mesh)
+```
 
 ## Watermark: Embed and Detect
 

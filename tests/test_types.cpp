@@ -160,3 +160,65 @@ TEST(MeshView, ExternalBufferReference) {
     EXPECT_EQ(view.triangles.size(), 1u);
     EXPECT_FLOAT_EQ(view.vertices[1].x, 1.0f);
 }
+
+TEST(AsVertexSpan, FromRawFloatPointer) {
+    float data[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    auto span = n3mf::AsVertexSpan(data, 2);
+    EXPECT_EQ(span.size(), 2u);
+    EXPECT_FLOAT_EQ(span[0].x, 1.0f);
+    EXPECT_FLOAT_EQ(span[0].y, 2.0f);
+    EXPECT_FLOAT_EQ(span[0].z, 3.0f);
+    EXPECT_FLOAT_EQ(span[1].x, 4.0f);
+}
+
+TEST(AsVertexSpan, FromLayoutCompatibleStruct) {
+    struct MyVec3 {
+        float x, y, z;
+    };
+    MyVec3 data[] = {{10.0f, 20.0f, 30.0f}, {40.0f, 50.0f, 60.0f}};
+    auto span = n3mf::AsVertexSpan(data, 2);
+    EXPECT_EQ(span.size(), 2u);
+    EXPECT_FLOAT_EQ(span[0].x, 10.0f);
+    EXPECT_FLOAT_EQ(span[1].z, 60.0f);
+}
+
+TEST(AsVertexSpan, EmptySpan) {
+    auto span = n3mf::AsVertexSpan(static_cast<const float *>(nullptr), 0);
+    EXPECT_EQ(span.size(), 0u);
+    EXPECT_TRUE(span.empty());
+}
+
+TEST(AsTriangleSpan, FromRawUint32Pointer) {
+    uint32_t data[] = {0, 1, 2, 3, 4, 5};
+    auto span = n3mf::AsTriangleSpan(data, 2);
+    EXPECT_EQ(span.size(), 2u);
+    EXPECT_EQ(span[0].v1, 0u);
+    EXPECT_EQ(span[0].v2, 1u);
+    EXPECT_EQ(span[0].v3, 2u);
+    EXPECT_EQ(span[1].v1, 3u);
+}
+
+TEST(AsTriangleSpan, FromLayoutCompatibleStruct) {
+    struct MyTri {
+        uint32_t a, b, c;
+    };
+    MyTri data[] = {{10, 20, 30}};
+    auto span = n3mf::AsTriangleSpan(data, 1);
+    EXPECT_EQ(span.size(), 1u);
+    EXPECT_EQ(span[0].v1, 10u);
+    EXPECT_EQ(span[0].v2, 20u);
+    EXPECT_EQ(span[0].v3, 30u);
+}
+
+TEST(AsVertexSpan, UsableInMeshView) {
+    float verts[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    uint32_t tris[] = {0, 1, 2};
+    n3mf::MeshView view{
+        n3mf::AsVertexSpan(verts, 3),
+        n3mf::AsTriangleSpan(tris, 1),
+        {},
+    };
+    EXPECT_EQ(view.vertices.size(), 3u);
+    EXPECT_EQ(view.triangles.size(), 1u);
+    EXPECT_FLOAT_EQ(view.vertices[2].y, 1.0f);
+}
