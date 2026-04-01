@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace neroued_3mf {
@@ -31,6 +32,43 @@ struct IndexTriangle {
 
     bool operator==(const IndexTriangle &) const = default;
 };
+
+static_assert(std::is_standard_layout_v<Vec3f>);
+static_assert(sizeof(Vec3f) == 3 * sizeof(float));
+static_assert(alignof(Vec3f) == alignof(float));
+
+static_assert(std::is_standard_layout_v<IndexTriangle>);
+static_assert(sizeof(IndexTriangle) == 3 * sizeof(uint32_t));
+static_assert(alignof(IndexTriangle) == alignof(uint32_t));
+
+/// Reinterpret a contiguous float array as a Vec3f span (3 floats per vertex).
+inline std::span<const Vec3f> AsVertexSpan(const float *data, std::size_t vertex_count) {
+    return {reinterpret_cast<const Vec3f *>(data), vertex_count};
+}
+
+/// Reinterpret a contiguous uint32_t array as an IndexTriangle span (3 values per triangle).
+inline std::span<const IndexTriangle> AsTriangleSpan(const uint32_t *data,
+                                                     std::size_t triangle_count) {
+    return {reinterpret_cast<const IndexTriangle *>(data), triangle_count};
+}
+
+/// Reinterpret a layout-compatible vertex type as a Vec3f span.
+template <typename V>
+    requires(!std::is_same_v<V, float> && std::is_standard_layout_v<V> &&
+             std::is_trivially_copyable_v<V> && sizeof(V) == sizeof(Vec3f) &&
+             alignof(V) >= alignof(Vec3f))
+std::span<const Vec3f> AsVertexSpan(const V *data, std::size_t count) {
+    return {reinterpret_cast<const Vec3f *>(data), count};
+}
+
+/// Reinterpret a layout-compatible triangle index type as an IndexTriangle span.
+template <typename T>
+    requires(!std::is_same_v<T, uint32_t> && std::is_standard_layout_v<T> &&
+             std::is_trivially_copyable_v<T> && sizeof(T) == sizeof(IndexTriangle) &&
+             alignof(T) >= alignof(IndexTriangle))
+std::span<const IndexTriangle> AsTriangleSpan(const T *data, std::size_t count) {
+    return {reinterpret_cast<const IndexTriangle *>(data), count};
+}
 
 /// Per-triangle property override (3MF Core Spec 4.1.4).
 /// References a property group (pid) and per-vertex property indices (p1, p2, p3).

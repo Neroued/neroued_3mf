@@ -15,8 +15,68 @@ namespace nb = nanobind;
 using namespace nb::literals;
 namespace n3mf = neroued_3mf;
 
-static_assert(sizeof(n3mf::Vec3f) == 3 * sizeof(float));
-static_assert(sizeof(n3mf::IndexTriangle) == 3 * sizeof(uint32_t));
+namespace {
+
+n3mf::Mesh MeshFromNumpy(nb::ndarray<nb::numpy> vert_in, nb::ndarray<nb::numpy> tri_in) {
+    if (vert_in.ndim() != 2 || vert_in.shape(1) != 3)
+        throw n3mf::InputError("vertices: expected shape (N, 3)");
+    if (tri_in.ndim() != 2 || tri_in.shape(1) != 3)
+        throw n3mf::InputError("triangles: expected shape (M, 3)");
+
+    const size_t nv = vert_in.shape(0);
+    const size_t nt = tri_in.shape(0);
+    n3mf::Mesh mesh;
+    if (nv == 0 || nt == 0) return mesh;
+
+    mesh.vertices.resize(nv);
+    mesh.triangles.resize(nt);
+
+    auto is_c_contig = [](const nb::ndarray<nb::numpy> &a) {
+        return a.stride(0) == 3 && a.stride(1) == 1;
+    };
+
+    if (vert_in.dtype() == nb::dtype<float>()) {
+        if (!is_c_contig(vert_in)) throw n3mf::InputError("vertices: array must be C-contiguous");
+        std::memcpy(mesh.vertices.data(), vert_in.data(), nv * sizeof(n3mf::Vec3f));
+    } else if (vert_in.dtype() == nb::dtype<double>()) {
+        if (!is_c_contig(vert_in)) throw n3mf::InputError("vertices: array must be C-contiguous");
+        const auto *s = static_cast<const double *>(vert_in.data());
+        for (size_t i = 0; i < nv; ++i) {
+            mesh.vertices[i].x = static_cast<float>(s[i * 3]);
+            mesh.vertices[i].y = static_cast<float>(s[i * 3 + 1]);
+            mesh.vertices[i].z = static_cast<float>(s[i * 3 + 2]);
+        }
+    } else {
+        throw n3mf::InputError("vertices: expected float32 or float64 dtype");
+    }
+
+    auto copy_signed = [&](const auto *src) {
+        auto *dst = reinterpret_cast<uint32_t *>(mesh.triangles.data());
+        for (size_t i = 0; i < nt * 3; ++i) {
+            auto v = src[i];
+            if (v < 0 || static_cast<uint64_t>(v) > UINT32_MAX)
+                throw n3mf::InputError("triangles: vertex index out of uint32 range");
+            dst[i] = static_cast<uint32_t>(v);
+        }
+    };
+
+    if (tri_in.dtype() == nb::dtype<uint32_t>()) {
+        if (!is_c_contig(tri_in)) throw n3mf::InputError("triangles: array must be C-contiguous");
+        std::memcpy(mesh.triangles.data(), tri_in.data(), nt * sizeof(n3mf::IndexTriangle));
+    } else if (tri_in.dtype() == nb::dtype<int32_t>()) {
+        if (!is_c_contig(tri_in)) throw n3mf::InputError("triangles: array must be C-contiguous");
+        copy_signed(static_cast<const int32_t *>(tri_in.data()));
+    } else if (tri_in.dtype() == nb::dtype<int64_t>()) {
+        if (!is_c_contig(tri_in)) throw n3mf::InputError("triangles: array must be C-contiguous");
+        copy_signed(static_cast<const int64_t *>(tri_in.data()));
+    } else {
+        throw n3mf::InputError("triangles: expected uint32, int32, or int64 dtype");
+    }
+
+    return mesh;
+}
+
+} // namespace
 
 NB_MODULE(_neroued_3mf, m) {
     m.doc() = "Python bindings for neroued_3mf — lightweight 3MF file writer";
@@ -182,68 +242,7 @@ NB_MODULE(_neroued_3mf, m) {
         .def_static(
             "from_arrays",
             [](nb::ndarray<nb::numpy> vert_in, nb::ndarray<nb::numpy> tri_in) -> n3mf::Mesh {
-                if (vert_in.ndim() != 2 || vert_in.shape(1) != 3)
-                    throw n3mf::InputError("vertices: expected shape (N, 3)");
-                if (tri_in.ndim() != 2 || tri_in.shape(1) != 3)
-                    throw n3mf::InputError("triangles: expected shape (M, 3)");
-
-                const size_t nv = vert_in.shape(0);
-                const size_t nt = tri_in.shape(0);
-                n3mf::Mesh mesh;
-                if (nv == 0 || nt == 0) return mesh;
-
-                mesh.vertices.resize(nv);
-                mesh.triangles.resize(nt);
-
-                auto is_c_contig = [](const nb::ndarray<nb::numpy> &a) {
-                    return a.stride(0) == 3 && a.stride(1) == 1;
-                };
-
-                if (vert_in.dtype() == nb::dtype<float>()) {
-                    if (!is_c_contig(vert_in))
-                        throw n3mf::InputError("vertices: array must be C-contiguous");
-                    std::memcpy(mesh.vertices.data(), vert_in.data(), nv * sizeof(n3mf::Vec3f));
-                } else if (vert_in.dtype() == nb::dtype<double>()) {
-                    if (!is_c_contig(vert_in))
-                        throw n3mf::InputError("vertices: array must be C-contiguous");
-                    const auto *s = static_cast<const double *>(vert_in.data());
-                    for (size_t i = 0; i < nv; ++i) {
-                        mesh.vertices[i].x = static_cast<float>(s[i * 3]);
-                        mesh.vertices[i].y = static_cast<float>(s[i * 3 + 1]);
-                        mesh.vertices[i].z = static_cast<float>(s[i * 3 + 2]);
-                    }
-                } else {
-                    throw n3mf::InputError("vertices: expected float32 or float64 dtype");
-                }
-
-                auto copy_signed = [&](const auto *src) {
-                    auto *dst = reinterpret_cast<uint32_t *>(mesh.triangles.data());
-                    for (size_t i = 0; i < nt * 3; ++i) {
-                        auto v = src[i];
-                        if (v < 0 || static_cast<uint64_t>(v) > UINT32_MAX)
-                            throw n3mf::InputError("triangles: vertex index out of uint32 range");
-                        dst[i] = static_cast<uint32_t>(v);
-                    }
-                };
-
-                if (tri_in.dtype() == nb::dtype<uint32_t>()) {
-                    if (!is_c_contig(tri_in))
-                        throw n3mf::InputError("triangles: array must be C-contiguous");
-                    std::memcpy(mesh.triangles.data(), tri_in.data(),
-                                nt * sizeof(n3mf::IndexTriangle));
-                } else if (tri_in.dtype() == nb::dtype<int32_t>()) {
-                    if (!is_c_contig(tri_in))
-                        throw n3mf::InputError("triangles: array must be C-contiguous");
-                    copy_signed(static_cast<const int32_t *>(tri_in.data()));
-                } else if (tri_in.dtype() == nb::dtype<int64_t>()) {
-                    if (!is_c_contig(tri_in))
-                        throw n3mf::InputError("triangles: array must be C-contiguous");
-                    copy_signed(static_cast<const int64_t *>(tri_in.data()));
-                } else {
-                    throw n3mf::InputError("triangles: expected uint32, int32, or int64 dtype");
-                }
-
-                return mesh;
+                return MeshFromNumpy(vert_in, tri_in);
             },
             "vertices"_a, "triangles"_a);
 
@@ -548,6 +547,57 @@ NB_MODULE(_neroued_3mf, m) {
             },
             "name"_a, "mesh"_a, "pid"_a.none() = nb::none(), "pindex"_a.none() = nb::none())
 
+        // Zero-copy: float32 vertices + uint32 triangles
+        .def(
+            "add_mesh_object",
+            [](n3mf::DocumentBuilder &self, std::string name,
+               nb::ndarray<const float, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu> vertices,
+               nb::ndarray<const uint32_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>
+                   triangles,
+               std::optional<uint32_t> pid, std::optional<uint32_t> pindex) -> uint32_t {
+                n3mf::MeshView view{
+                    n3mf::AsVertexSpan(static_cast<const float *>(vertices.data()),
+                                       vertices.shape(0)),
+                    n3mf::AsTriangleSpan(static_cast<const uint32_t *>(triangles.data()),
+                                         triangles.shape(0)),
+                    {}};
+                return self.AddMeshObject(std::move(name), view, pid, pindex);
+            },
+            "name"_a, "vertices"_a, "triangles"_a, "pid"_a.none() = nb::none(),
+            "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>())
+
+        // Zero-copy: float32 vertices + int32 triangles (reinterpret)
+        .def(
+            "add_mesh_object",
+            [](n3mf::DocumentBuilder &self, std::string name,
+               nb::ndarray<const float, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu> vertices,
+               nb::ndarray<const int32_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>
+                   triangles,
+               std::optional<uint32_t> pid, std::optional<uint32_t> pindex) -> uint32_t {
+                static_assert(sizeof(int32_t) == sizeof(uint32_t));
+                n3mf::MeshView view{
+                    n3mf::AsVertexSpan(static_cast<const float *>(vertices.data()),
+                                       vertices.shape(0)),
+                    {reinterpret_cast<const n3mf::IndexTriangle *>(triangles.data()),
+                     triangles.shape(0)},
+                    {}};
+                return self.AddMeshObject(std::move(name), view, pid, pindex);
+            },
+            "name"_a, "vertices"_a, "triangles"_a, "pid"_a.none() = nb::none(),
+            "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>())
+
+        // Conversion: all other dtype combinations (float64, int64, etc.)
+        .def(
+            "add_mesh_object",
+            [](n3mf::DocumentBuilder &self, std::string name, nb::ndarray<nb::numpy> vertices,
+               nb::ndarray<nb::numpy> triangles, std::optional<uint32_t> pid,
+               std::optional<uint32_t> pindex) -> uint32_t {
+                auto mesh = MeshFromNumpy(vertices, triangles);
+                return self.AddMeshObject(std::move(name), std::move(mesh), pid, pindex);
+            },
+            "name"_a, "vertices"_a, "triangles"_a, "pid"_a.none() = nb::none(),
+            "pindex"_a.none() = nb::none())
+
         .def("add_component_object", &n3mf::DocumentBuilder::AddComponentObject, "name"_a,
              "components"_a)
 
@@ -598,7 +648,7 @@ NB_MODULE(_neroued_3mf, m) {
         .def("add_external_model_metadata", &n3mf::DocumentBuilder::AddExternalModelMetadata,
              "name"_a, "value"_a, "type"_a = "", nb::rv_policy::reference)
 
-        .def("build", &n3mf::DocumentBuilder::Build);
+        .def("build", &n3mf::DocumentBuilder::Build, nb::keep_alive<0, 1>());
 
     // ---- Writer functions --------------------------------------------------
 

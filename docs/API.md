@@ -16,6 +16,29 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 
 `Mesh` implicitly converts to `MeshView`, so all APIs accepting `MeshView` also accept `Mesh`.
 
+### Zero-copy Helpers
+
+Helper functions for constructing `MeshView` from layout-compatible external data without copying:
+
+| Function | Description |
+|----------|-------------|
+| `AsVertexSpan(const float*, size_t)` | Reinterpret a flat `float` array as `span<const Vec3f>` (3 floats per vertex) |
+| `AsVertexSpan(const V*, size_t)` | Reinterpret a layout-compatible custom struct as `span<const Vec3f>` (requires concept constraints: standard layout, trivially copyable, `sizeof(V) == sizeof(Vec3f)`) |
+| `AsTriangleSpan(const uint32_t*, size_t)` | Reinterpret a flat `uint32_t` array as `span<const IndexTriangle>` (3 values per triangle) |
+| `AsTriangleSpan(const T*, size_t)` | Reinterpret a layout-compatible custom struct as `span<const IndexTriangle>` (same concept constraints) |
+
+Layout safety is guaranteed by `static_assert` at compile time:
+
+```cpp
+static_assert(std::is_standard_layout_v<Vec3f>);
+static_assert(sizeof(Vec3f) == 3 * sizeof(float));
+static_assert(alignof(Vec3f) == alignof(float));
+
+static_assert(std::is_standard_layout_v<IndexTriangle>);
+static_assert(sizeof(IndexTriangle) == 3 * sizeof(uint32_t));
+static_assert(alignof(IndexTriangle) == alignof(uint32_t));
+```
+
 ## Materials (`materials.h`)
 
 | Type | Description |
@@ -58,7 +81,7 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 | Method | Description |
 |--------|-------------|
 | `AddBaseMaterialGroup(materials)` | Add material group, returns auto-assigned ID |
-| `AddMeshObject(name, MeshView, pid, pindex)` | Add mesh object (zero-copy), returns ID |
+| `AddMeshObject(name, MeshView, pid, pindex)` | Add mesh object (zero-copy from external buffer), returns ID |
 | `AddMeshObject(name, Mesh&&, pid, pindex)` | Add mesh object (takes ownership), returns ID |
 | `AddComponentObject(name, components)` | Add assembly object, returns ID |
 
@@ -159,6 +182,30 @@ All watermark types and functions are available in Python. `vector<uint8_t>` fie
 | `DetectWatermark(data, key)` | `detect_watermark(data: bytes, key: bytes = b"") -> WatermarkResult` |
 | `HasL2Signature(data)` | `has_l2_signature(data: bytes) -> bool` |
 | `WriteOptions.watermark` | `WatermarkConfig` (read-write) |
+
+## Python `add_mesh_object` NumPy Overloads
+
+In addition to accepting a `Mesh` object, `DocumentBuilder.add_mesh_object()` accepts NumPy arrays directly. nanobind selects the best overload based on array dtypes:
+
+| Vertex dtype | Triangle dtype | Path | Typical source |
+|-------------|---------------|------|----------------|
+| float32 | uint32 | **Zero-copy** | Custom / GPU data |
+| float32 | int32 | **Zero-copy** (reinterpret) | Open3D tensor API |
+| float64 | int32 | Fast conversion | Open3D legacy, pymeshlab |
+| float64 | int64 | Fast conversion | trimesh, PyVista, meshio |
+| float64 | uint32 | Fast conversion | — |
+| float32 | int64 | Fast conversion | — |
+
+**Lifetime management**: Zero-copy overloads use `keep_alive` to ensure NumPy arrays are not garbage-collected while referenced by `DocumentBuilder` → `Document`. Conversion overloads copy data into the builder, so arrays can be freed immediately.
+
+```python
+builder = n3mf.DocumentBuilder()
+
+# Same method, different input types:
+obj1 = builder.add_mesh_object("Part1", mesh)                     # Mesh object
+obj2 = builder.add_mesh_object("Part2", verts_f32, tris_u32)      # zero-copy
+obj3 = builder.add_mesh_object("Part3", verts_f64, tris_i64)      # conversion
+```
 
 ## Error Types (`error.h`)
 

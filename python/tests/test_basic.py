@@ -397,6 +397,115 @@ class TestMeshFromArrays:
 
 
 # ---------------------------------------------------------------------------
+# add_mesh_object NumPy overloads
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
+class TestAddMeshObjectNumpy:
+    """Tests for DocumentBuilder.add_mesh_object(name, vertices, triangles, ...)."""
+
+    def test_zero_copy_float32_uint32(self):
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+        assert len(buf) > 100
+
+    def test_zero_copy_float32_int32(self):
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.int32)
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+
+    def test_conversion_float64_int64(self):
+        """trimesh-style dtypes: float64 + int64."""
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float64)
+        tris = np.array([[0, 1, 2]], dtype=np.int64)
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+
+    def test_conversion_float64_int32(self):
+        """Open3D legacy / pymeshlab dtypes: float64 + int32."""
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float64)
+        tris = np.array([[0, 1, 2]], dtype=np.int32)
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+
+    def test_conversion_float64_uint32(self):
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float64)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+
+    def test_with_material(self):
+        builder = n3mf.DocumentBuilder()
+        mat_id = builder.add_base_material_group([
+            n3mf.BaseMaterial("Red", n3mf.Color(255, 0, 0, 255)),
+        ])
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        obj_id = builder.add_mesh_object("Part", verts, tris, pid=mat_id, pindex=0)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        assert len(doc.base_material_groups) == 1
+
+    def test_output_matches_mesh_path(self):
+        """NumPy overload and Mesh path produce identical 3MF content."""
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        opts = n3mf.WriteOptions()
+        opts.deterministic = True
+
+        builder1 = n3mf.DocumentBuilder()
+        builder1.set_unit(n3mf.Unit.Millimeter)
+        obj1 = builder1.add_mesh_object("Part", verts, tris)
+        builder1.add_build_item(obj1)
+        buf1 = n3mf.write_to_buffer(builder1.build(), opts)
+
+        mesh = n3mf.Mesh.from_arrays(verts, tris)
+        builder2 = n3mf.DocumentBuilder()
+        builder2.set_unit(n3mf.Unit.Millimeter)
+        obj2 = builder2.add_mesh_object("Part", mesh)
+        builder2.add_build_item(obj2)
+        buf2 = n3mf.write_to_buffer(builder2.build(), opts)
+
+        assert buf1 == buf2
+
+    def test_lifetime_safety(self):
+        """NumPy arrays can be deleted after build(); Document remains valid."""
+        builder = n3mf.DocumentBuilder()
+        verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        builder.add_mesh_object("Part", verts, tris)
+        builder.add_build_item(1)
+        doc = builder.build()
+        del verts, tris, builder
+        buf = n3mf.write_to_buffer(doc)
+        assert buf[:2] == b"PK"
+        assert len(buf) > 100
+
+
+# ---------------------------------------------------------------------------
 # Watermark
 # ---------------------------------------------------------------------------
 
