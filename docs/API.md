@@ -8,9 +8,11 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 |------|-------------|
 | `Vec3f` | 3D float vector `{x, y, z}` — binary-compatible with common 3D library vector types |
 | `IndexTriangle` | Triangle indices `{v1, v2, v3}` as `uint32_t` |
+| `TriangleWriteMode` | Triangle write policy: `Keep` or `FilterDegenerate` |
 | `TriangleProperty` | Per-triangle material property `{pid, p1, p2, p3}` |
 | `MeshView` | Non-owning spans (`std::span`) over external vertex/index/property buffers |
 | `Mesh` | Owning mesh with `Validate()`, `RemoveDegenerateTriangles()`, `Append()`, `ComputeBoundingBox()` |
+| `MeshAnalysis` | Shared mesh analysis result (`bbox`, source/written triangle counts, degenerate count, out-of-range count) |
 | `Color` | RGBA color with `ToHex()` / `FromHex()` conversion |
 | `Transform` | 3MF affine transform (3x4 matrix) with `Identity()`, `Translation()`, `IsIdentity()` |
 
@@ -26,6 +28,19 @@ Helper functions for constructing `MeshView` from layout-compatible external dat
 | `AsVertexSpan(const V*, size_t)` | Reinterpret a layout-compatible custom struct as `span<const Vec3f>` (requires concept constraints: standard layout, trivially copyable, `sizeof(V) == sizeof(Vec3f)`) |
 | `AsTriangleSpan(const uint32_t*, size_t)` | Reinterpret a flat `uint32_t` array as `span<const IndexTriangle>` (3 values per triangle) |
 | `AsTriangleSpan(const T*, size_t)` | Reinterpret a layout-compatible custom struct as `span<const IndexTriangle>` (same concept constraints) |
+| `AsSignedIndexSpan(const int32_t*, size_t)` | Reinterpret a flat signed index buffer as `span<const int32_t>` (3 values per triangle) |
+| `AsSignedIndexSpan(const T*, size_t)` | Reinterpret a layout-compatible signed triangle struct as `span<const int32_t>` |
+
+### Mesh Analysis Helpers
+
+These helpers let callers inspect foreign mesh buffers before writing, without first copying into `Mesh`:
+
+| Function | Description |
+|----------|-------------|
+| `AnalyzeSignedTriangleBuffer(vertices, signed_indices, mode)` | Analyze external vertex buffers plus signed triangle indices (e.g. `int32_t` / `Vec3i`) |
+| `AnalyzeMesh(mesh, mode)` | Analyze an already-normalized `MeshView` / `Mesh` |
+
+`MeshAnalysis::Valid()` reports whether any triangle referenced a negative or out-of-range vertex index. `MeshAnalysis::HasWritableTriangles()` reports whether anything remains after optional degenerate filtering.
 
 Layout safety is guaranteed by `static_assert` at compile time:
 
@@ -139,6 +154,7 @@ static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 | `deterministic` | `bool` | `true` | Zero timestamps for reproducible output |
 | `compact_xml` | `bool` | `false` | Omit XML indentation (~15-20% smaller) |
 | `vertex_precision` | `int` | `9` | Significant digits for vertex coordinates (1-9). Transform matrices always use full precision |
+| `triangle_write_mode` | `TriangleWriteMode` | `Keep` | Keep all valid triangles, or skip index/area-degenerate triangles during XML output |
 | `watermark` | `WatermarkConfig` | (disabled) | L1 triangle-rotation watermark configuration |
 
 ### WatermarkConfig

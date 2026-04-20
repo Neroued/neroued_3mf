@@ -46,6 +46,22 @@ neroued_3mf 从 [ChromaPrint3D](https://github.com/neroued/ChromaPrint3D) 的 3M
 
 `Mesh` 可隐式转换为 `MeshView`，因此所有接受 `MeshView` 的 API 都自动兼容 `Mesh`。
 
+### 2.1.1 有符号索引分析与“规范化 MeshView”
+
+`MeshView` 保持一个明确约束：它只表达**已经规范化、可直接写出**的网格视图，即：
+
+- 顶点：`span<const Vec3f>`
+- 三角形：`span<const IndexTriangle>`（`uint32_t` 语义）
+- 可选 `triangle_properties`
+
+这意味着库**不会**再引入 `SignedMeshView`、callback mesh 或访问器风格的新主模型。对于调用方常见的 `int32_t` / `Vec3i` 三角索引缓冲，库新增的是**分析层能力**：
+
+- `AsSignedIndexSpan()`：把 layout-compatible 的 signed triangle buffer 零拷贝映射成 `span<const int32_t>`
+- `AnalyzeSignedTriangleBuffer()`：在不拷贝的前提下完成 bbox、越界计数、退化面计数和“实际可写三角形数”统计
+- `AnalyzeMesh()`：对已经规范化的 `MeshView` / `Mesh` 复用同一套统计逻辑
+
+这样做的核心原因是：负索引和越界索引属于**输入合法性问题**，而不是 `MeshView` 自身的语义问题。调用方先分析、再决定是否把同一块外部缓冲以 `MeshView` 形式交给 writer，就可以在保持 API 稳定的前提下实现零拷贝桥接。
+
 ### 2.2 Document-first 流式写入（方式 A）
 
 写入流程分两步：
@@ -63,6 +79,14 @@ neroued_3mf 从 [ChromaPrint3D](https://github.com/neroued/ChromaPrint3D) 的 3M
 **热路径零堆分配**：顶点/三角形的浮点和整数格式化（`std::to_chars`）直接写入 `XmlStreamBuffer` 的栈缓冲区，消除了每元素 3-7 次 `std::string` 临时分配。
 
 **紧凑 XML 模式**：`WriteOptions::compact_xml = true` 省略所有缩进空白，可减少 ~15-20% 的 XML 输出大小。
+
+**可选退化面过滤**：`WriteOptions::triangle_write_mode` 默认为 `Keep`，保持历史行为不变；当显式设为 `FilterDegenerate` 时，writer 会在 XML 输出阶段跳过索引退化和面积退化三角形。过滤逻辑与分析 API 共用同一个内部实现（`src/internal/mesh_analysis.h`），从而保证：
+
+- `triangle_properties` 与最终输出的 `<triangle>` 集合严格对齐
+- watermark rotation table 的长度按**实际写出**的 triangle 数计算
+- Production merged/per-object 路径的 `tri_offset` 累计与过滤后的输出一致
+
+这使得调用方可以在保留现有 `MeshView` 语义的前提下，把“预检”和“实际写出”收敛到同一条语义路径上。
 
 **未采用的备选方案（方式 B：完全流式）**：逐对象写入，允许写完一个对象后立即释放其网格数据。代价是 3MF XML 结构要求 `<resources>` 在 `<build>` 之前出现，完全流式需要更复杂的两趟写入或延迟 build 元素。方式 A 在实现复杂度和内存节省之间取得了更好的平衡。
 
@@ -233,6 +257,7 @@ neroued_3mf 内置两层互补的水印机制，用于在不影响几何精度�
 | 流式缓冲 | `internal/xml_stream_buffer.h` | `XmlStreamBuffer<Sink>`（64KB 固定缓冲，直接 `to_chars` 格式化） |
 | ZIP 打包 | `zip.cpp/h` | StreamingZipWriter（deflate 流式压缩 + Data Descriptor + ZIP64）|
 | 校验 | `internal/validate.h` | Document 一致性校验（O(1) 哈希查找，由 `Build()` 和 `Write*` 调用）|
+| 网格分析 | `internal/mesh_analysis.h` | 共享 bbox / 越界 / 退化面判定，供 types / writer 复用 |
 | OPC 类型 | `internal/opc_types.h` | 内部 OpcPart / OpcRelationship 结构体 |
 | SHA-256 | `internal/sha256.h` | Header-only SHA-256 + HMAC-SHA-256（密钥流生成）|
 | 水印核心 | `internal/watermark.h` | L1 编解码 + CanonicalRotation + ScanTrianglesFromXml |

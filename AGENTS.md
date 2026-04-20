@@ -32,7 +32,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 
 - `include/neroued/3mf/`：公共 API 头文件
 - `src/`：库实现（builder、writer、opc、zip）
-- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、omp_config、sha256、watermark、zip_read）
+- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、mesh_analysis、omp_config、sha256、watermark、zip_read）
 - `tools/`：CLI 工具（`n3mf_detect` 水印检测、`n3mf_generate_test` 测试文件生成）
 - `tests/`：单元测试（GoogleTest）
 - `python/`：Python 绑定（nanobind + scikit-build-core）
@@ -57,6 +57,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 修改 Builder API | `include/neroued/3mf/builder.h`、`src/builder.cpp` |
 | 修改 Document 校验规则 | `src/internal/validate.h` |
 | 修改写入流程 | `src/writer.cpp` |
+| 修改外部 mesh 分析 / 退化面过滤 | `include/neroued/3mf/types.h`、`src/types.cpp`、`src/internal/mesh_analysis.h`、`src/writer.cpp`、`src/opc.h` |
 | 添加自定义扩展支持 | `include/neroued/3mf/document.h`（CustomPart / CustomRelationship） |
 | 修改 CMake 构建 / 安装 | `CMakeLists.txt`、`cmake/neroued_3mf-config.cmake.in` |
 | 为 Reader 做准备 | `include/neroued/3mf/error.h`（FormatError）、`document.h`（Document 共享模型） |
@@ -89,7 +90,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | `neroued_3mf.h` | Umbrella header（include 全部公开头） |
 | `version.h` | 编译期版本宏（CMake 生成） |
 | `fwd.h` | 全部公共类型的前向声明 |
-| `types.h` | `Vec3f`、`IndexTriangle`、`MeshView`、`Mesh`、`Color`、`Transform` |
+| `types.h` | `Vec3f`、`IndexTriangle`、`TriangleWriteMode`、`MeshView`、`Mesh`、`MeshAnalysis`、`Color`、`Transform` |
 | `materials.h` | `BaseMaterial`、`BaseMaterialGroup` |
 | `document.h` | `Document`、`Object`、`BuildItem`、`Component`、`Thumbnail`、`ObjectType`、`CustomPart`/`CustomRelationship` |
 | `builder.h` | `DocumentBuilder`（Builder 模式构建 Document） |
@@ -128,7 +129,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 - [ ] 测试通过：`cd build && ctest --output-on-failure`
 - [ ] 公共 API 变更 → 更新 docs/API.md
 - [ ] Document 模型变更 → 更新 docs/DESIGN.md 对应章节
-- [ ] 配置参数增删 → 更新 docs/BUILDING.md CMake Options
+- [ ] 配置参数增删（包含 `WriteOptions`）→ 更新 docs/BUILDING.md
 - [ ] 用法示例变更 → 更新 docs/EXAMPLES.md
 - [ ] 新增文件 → 更新 CMakeLists.txt 和 AGENTS.md 目录映射
 - [ ] 不引入重复工具函数

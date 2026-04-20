@@ -60,6 +60,55 @@ auto buffer = neroued_3mf::WriteToBuffer(doc);
 // Caller must keep vertex/index data alive until Write* returns.
 ```
 
+## Zero-copy with Signed Indices and Filtered Write
+
+Some pipelines store triangle indices as signed `int32_t` triplets (`Vec3i`, Open3D-style tensors, etc.). `MeshView` deliberately stays normalized (`uint32_t` semantics only), so the recommended flow is:
+
+1. Zero-copy analyze the signed buffer
+2. Reject negative / out-of-range indices
+3. Reuse the same buffer as `MeshView`
+4. Enable filtered write if you want writer-side degenerate triangle removal
+
+```cpp
+struct MyVec3 {
+    float x, y, z;
+};
+
+struct MyTri32 {
+    int32_t a, b, c;
+};
+
+std::vector<MyVec3> vertices = /* meshing output */;
+std::vector<MyTri32> triangles = /* may contain signed indices */;
+
+auto analysis = neroued_3mf::AnalyzeSignedTriangleBuffer(
+    neroued_3mf::AsVertexSpan(vertices.data(), vertices.size()),
+    neroued_3mf::AsSignedIndexSpan(triangles.data(), triangles.size()),
+    neroued_3mf::TriangleWriteMode::FilterDegenerate);
+
+if (!analysis.Valid()) {
+    throw std::runtime_error("mesh index out of range");
+}
+if (!analysis.HasWritableTriangles()) {
+    throw std::runtime_error("all triangles were degenerate");
+}
+
+neroued_3mf::MeshView view{
+    neroued_3mf::AsVertexSpan(vertices.data(), vertices.size()),
+    neroued_3mf::AsTriangleSpan(triangles.data(), triangles.size()),
+    {}
+};
+
+neroued_3mf::DocumentBuilder builder;
+auto obj = builder.AddMeshObject("ExternalSigned", view);
+builder.AddBuildItem(obj);
+
+auto doc = builder.Build();
+neroued_3mf::WriteOptions opts;
+opts.triangle_write_mode = neroued_3mf::TriangleWriteMode::FilterDegenerate;
+neroued_3mf::WriteToFile("filtered.3mf", doc, opts);
+```
+
 ## Assembly with Core Components
 
 Objects can reference other objects through `<components>` to build assemblies within a single model file:

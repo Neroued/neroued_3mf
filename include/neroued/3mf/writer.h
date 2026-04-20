@@ -39,6 +39,9 @@ struct WriteOptions {
     /// Lower values reduce XML size at the cost of geometric precision.
     /// Transform matrices always use full precision regardless of this setting.
     int vertex_precision = 9;
+    /// Whether degenerate triangles should be emitted or skipped during write.
+    /// Default Keep preserves historical writer behavior.
+    TriangleWriteMode triangle_write_mode = TriangleWriteMode::Keep;
     /// L1 watermark configuration. Default (empty payload) = disabled.
     WatermarkConfig watermark;
 };

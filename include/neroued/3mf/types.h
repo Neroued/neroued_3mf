@@ -41,6 +41,12 @@ static_assert(std::is_standard_layout_v<IndexTriangle>);
 static_assert(sizeof(IndexTriangle) == 3 * sizeof(uint32_t));
 static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 
+/// Analyze/write policy for triangle buffers.
+enum class TriangleWriteMode {
+    Keep,
+    FilterDegenerate,
+};
+
 /// Reinterpret a contiguous float array as a Vec3f span (3 floats per vertex).
 inline std::span<const Vec3f> AsVertexSpan(const float *data, std::size_t vertex_count) {
     return {reinterpret_cast<const Vec3f *>(data), vertex_count};
@@ -68,6 +74,21 @@ template <typename T>
              alignof(T) >= alignof(IndexTriangle))
 std::span<const IndexTriangle> AsTriangleSpan(const T *data, std::size_t count) {
     return {reinterpret_cast<const IndexTriangle *>(data), count};
+}
+
+/// Reinterpret a contiguous int32_t array as a flat signed triangle index span.
+/// The returned span contains 3 * triangle_count indices.
+inline std::span<const int32_t> AsSignedIndexSpan(const int32_t *data, std::size_t triangle_count) {
+    return {data, triangle_count * 3};
+}
+
+/// Reinterpret a layout-compatible signed triangle type as a flat int32_t span.
+template <typename T>
+    requires(!std::is_same_v<T, int32_t> && std::is_standard_layout_v<T> &&
+             std::is_trivially_copyable_v<T> && sizeof(T) == 3 * sizeof(int32_t) &&
+             alignof(T) >= alignof(int32_t))
+std::span<const int32_t> AsSignedIndexSpan(const T *data, std::size_t triangle_count) {
+    return {reinterpret_cast<const int32_t *>(data), triangle_count * 3};
 }
 
 /// Per-triangle property override (3MF Core Spec 4.1.4).
@@ -113,12 +134,32 @@ struct BBox {
     Vec3f min, max;
 };
 
+/// Mesh analysis result for validation / export planning.
+struct MeshAnalysis {
+    BBox bbox;
+    std::size_t source_triangle_count = 0;
+    std::size_t written_triangle_count = 0;
+    std::size_t degenerate_count = 0;
+    std::size_t out_of_range_count = 0;
+
+    bool Valid() const { return out_of_range_count == 0; }
+    bool HasWritableTriangles() const { return written_triangle_count != 0; }
+};
+
 /// Mesh validation result.
 struct ValidationResult {
     std::size_t degenerate_count = 0;
     std::size_t out_of_range_count = 0;
     bool Valid() const { return out_of_range_count == 0; }
 };
+
+/// Analyze a mesh backed by signed triangle indices (3 indices per triangle).
+MeshAnalysis AnalyzeSignedTriangleBuffer(std::span<const Vec3f> vertices,
+                                         std::span<const int32_t> triangle_indices,
+                                         TriangleWriteMode mode = TriangleWriteMode::Keep);
+
+/// Analyze a normalized MeshView.
+MeshAnalysis AnalyzeMesh(MeshView mesh, TriangleWriteMode mode = TriangleWriteMode::Keep);
 
 /// Owning triangle mesh with utility methods.
 struct Mesh {

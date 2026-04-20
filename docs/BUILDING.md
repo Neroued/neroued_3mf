@@ -76,6 +76,21 @@ Quick start with a single include:
 
 You can also include individual headers (`types.h`, `builder.h`, `writer.h`, etc.) for finer-grained control.
 
+## Runtime Write Options
+
+`WriteOptions` is a runtime API type (not a CMake option), but projects often centralize it in their integration layer. Relevant fields for this release:
+
+- `triangle_write_mode = Keep` (default): preserve historical writer behavior
+- `triangle_write_mode = FilterDegenerate`: skip index-degenerate and area-degenerate triangles during XML output
+
+Typical integration pattern:
+
+```cpp
+neroued_3mf::WriteOptions opts;
+opts.triangle_write_mode = neroued_3mf::TriangleWriteMode::FilterDegenerate;
+neroued_3mf::WriteToFile("output.3mf", doc, opts);
+```
+
 ## Python Bindings
 
 ### Install from source

@@ -1,3 +1,4 @@
+#include "neroued/3mf/error.h"
 #include "neroued/3mf/types.h"
 
 #include <gtest/gtest.h>
@@ -210,6 +211,27 @@ TEST(AsTriangleSpan, FromLayoutCompatibleStruct) {
     EXPECT_EQ(span[0].v3, 30u);
 }
 
+TEST(AsSignedIndexSpan, FromRawInt32Pointer) {
+    int32_t data[] = {0, 1, 2, -1, 4, 5};
+    auto span = n3mf::AsSignedIndexSpan(data, 2);
+    EXPECT_EQ(span.size(), 6u);
+    EXPECT_EQ(span[0], 0);
+    EXPECT_EQ(span[3], -1);
+    EXPECT_EQ(span[5], 5);
+}
+
+TEST(AsSignedIndexSpan, FromLayoutCompatibleStruct) {
+    struct MySignedTri {
+        int32_t a, b, c;
+    };
+    MySignedTri data[] = {{10, 20, 30}, {-1, 4, 5}};
+    auto span = n3mf::AsSignedIndexSpan(data, 2);
+    EXPECT_EQ(span.size(), 6u);
+    EXPECT_EQ(span[0], 10);
+    EXPECT_EQ(span[2], 30);
+    EXPECT_EQ(span[3], -1);
+}
+
 TEST(AsVertexSpan, UsableInMeshView) {
     float verts[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     uint32_t tris[] = {0, 1, 2};
@@ -221,4 +243,75 @@ TEST(AsVertexSpan, UsableInMeshView) {
     EXPECT_EQ(view.vertices.size(), 3u);
     EXPECT_EQ(view.triangles.size(), 1u);
     EXPECT_FLOAT_EQ(view.vertices[2].y, 1.0f);
+}
+
+TEST(AnalyzeMesh, KeepModeCountsDegenerateButKeepsTriangleCount) {
+    n3mf::Mesh mesh;
+    mesh.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh.triangles = {{0, 0, 1}, {0, 1, 2}};
+
+    auto analysis = n3mf::AnalyzeMesh(mesh.View(), n3mf::TriangleWriteMode::Keep);
+    EXPECT_TRUE(analysis.Valid());
+    EXPECT_EQ(analysis.source_triangle_count, 2u);
+    EXPECT_EQ(analysis.written_triangle_count, 2u);
+    EXPECT_EQ(analysis.degenerate_count, 1u);
+    EXPECT_EQ(analysis.out_of_range_count, 0u);
+    EXPECT_FLOAT_EQ(analysis.bbox.min.x, 0.0f);
+    EXPECT_FLOAT_EQ(analysis.bbox.max.y, 1.0f);
+}
+
+TEST(AnalyzeMesh, FilterModeSkipsDegenerateTriangles) {
+    n3mf::Mesh mesh;
+    mesh.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh.triangles = {{0, 0, 1}, {0, 1, 2}};
+
+    auto analysis = n3mf::AnalyzeMesh(mesh.View(), n3mf::TriangleWriteMode::FilterDegenerate);
+    EXPECT_TRUE(analysis.Valid());
+    EXPECT_EQ(analysis.source_triangle_count, 2u);
+    EXPECT_EQ(analysis.written_triangle_count, 1u);
+    EXPECT_EQ(analysis.degenerate_count, 1u);
+    EXPECT_EQ(analysis.out_of_range_count, 0u);
+    EXPECT_TRUE(analysis.HasWritableTriangles());
+}
+
+TEST(AnalyzeSignedTriangleBuffer, DetectsNegativeAndOutOfRangeIndices) {
+    float verts[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    int32_t tris[] = {-1, 1, 2, 0, 1, 5, 0, 1, 2};
+
+    auto analysis = n3mf::AnalyzeSignedTriangleBuffer(n3mf::AsVertexSpan(verts, 3),
+                                                      n3mf::AsSignedIndexSpan(tris, 3),
+                                                      n3mf::TriangleWriteMode::FilterDegenerate);
+    EXPECT_FALSE(analysis.Valid());
+    EXPECT_EQ(analysis.source_triangle_count, 3u);
+    EXPECT_EQ(analysis.written_triangle_count, 1u);
+    EXPECT_EQ(analysis.degenerate_count, 0u);
+    EXPECT_EQ(analysis.out_of_range_count, 2u);
+    EXPECT_FLOAT_EQ(analysis.bbox.max.x, 1.0f);
+    EXPECT_FLOAT_EQ(analysis.bbox.max.y, 1.0f);
+}
+
+TEST(AnalyzeSignedTriangleBuffer, FiltersDegenerateTrianglesFromLayoutCompatibleInput) {
+    struct MySignedTri {
+        int32_t a, b, c;
+    };
+
+    n3mf::Vec3f verts[] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    MySignedTri tris[] = {{0, 0, 1}, {0, 1, 2}};
+
+    auto analysis = n3mf::AnalyzeSignedTriangleBuffer(n3mf::AsVertexSpan(verts, 3),
+                                                      n3mf::AsSignedIndexSpan(tris, 2),
+                                                      n3mf::TriangleWriteMode::FilterDegenerate);
+    EXPECT_TRUE(analysis.Valid());
+    EXPECT_EQ(analysis.source_triangle_count, 2u);
+    EXPECT_EQ(analysis.written_triangle_count, 1u);
+    EXPECT_EQ(analysis.degenerate_count, 1u);
+    EXPECT_EQ(analysis.out_of_range_count, 0u);
+}
+
+TEST(AnalyzeSignedTriangleBuffer, RejectsNonTripletSpan) {
+    n3mf::Vec3f verts[] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    int32_t bad_indices[] = {0, 1, 2, 3};
+
+    EXPECT_THROW(n3mf::AnalyzeSignedTriangleBuffer(n3mf::AsVertexSpan(verts, 3), bad_indices),
+                 n3mf::InputError);
 }
