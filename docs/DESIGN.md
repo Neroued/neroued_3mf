@@ -66,7 +66,7 @@ neroued_3mf 从 [ChromaPrint3D](https://github.com/neroued/ChromaPrint3D) 的 3M
 
 写入流程分两步：
 
-1. **构建阶段**：通过 `DocumentBuilder` 构建一个轻量 `Document` 对象。Document 不拥有网格数据（Object 存储 `MeshView` 引用），仅持有元数据、材料定义、build items 和扩展注入点。
+1. **构建阶段**：通过 `DocumentBuilder` 构建一个轻量 `Document` 对象。Object 始终存储 `MeshView`；传入外部 `MeshView` 时 Document 不拥有网格数据，传入 `Mesh&&` 时则由 Document 的 `owned_meshes` 接管其生命周期。其余状态为元数据、材料定义、build items 和扩展注入点。
 2. **写入阶段**：`WriteToBuffer` / `WriteToFile` / `WriteToStream` 读取 Document，通过 `StreamMeshXml`（模板化，编译期内联 sink 回调）将网格数据直接格式化到 64KB 固定缓冲区（`XmlStreamBuffer`），避免热路径上的堆分配，满时 flush 到 `StreamingZipWriter` 进行分块 deflate 压缩。
 
 ```
@@ -119,20 +119,26 @@ builder.AddBuildItem(obj_id);
 
 `Build()` 将所有 builder 内部状态 move 到 `Document` 中（含 `owned_meshes_`）。由于 `std::vector` 的 move 语义保留了元素地址不变，已有的 `MeshView` span 引用在 move 后仍然有效。调用 `Build()` 后 builder 设置 `built_` 标志，后续任何修改方法均抛出 `InputError`，确保不会误用已消耗的 builder。
 
+`Document` 与 `DocumentBuilder` 均为 move-only。原因是 Object 中的 `MeshView` 可能指向同一对象内部的 owned mesh；默认浅拷贝会让副本继续引用原对象的存储，形成隐蔽的悬空引用风险。移动可保留底层 mesh 缓冲地址，又无需引入重绑定或共享所有权机制。
+
+`Mesh::Append()` 在修改目标前完成索引范围和 `uint32_t` 溢出检查，并通过快照安全支持 self-append。双方已有 triangle 时，`triangle_properties` 布局必须一致（均为空，或均与各自 triangle 数量相同）；空目标可以直接采用来源布局。对于无法无损表达的混合布局直接抛出 `InputError`。
+
 **对象属性设置**：Builder 采用"先创建、后配置"模式——`AddMeshObject` / `AddComponentObject` 返回 ID 后，通过 `SetObjectType`、`SetPartNumber`、`AddObjectMetadata`、`SetComponentTransform` 等方法按需设置属性。
 
-**Document 一致性校验**：`Build()` 和 `Write*` 均会自动校验 Document 的内部一致性，不合规时抛出 `InputError`。校验项包括：
+**Document 一致性校验**：`Build()` 和 `Write*` 均会自动执行低成本的 Core 结构校验，不合规时抛出 `InputError`。校验项包括：
 
-- 每个 `BuildItem::object_id` 引用了有效的 Object
-- 每个 `Object::pid`（如有）引用了有效的 `BaseMaterialGroup`
-- 每个 `Object::pindex`（如有）在材料组范围内
-- `triangle_properties` 非空时 size 等于 `triangles.size()`
-- `TriangleProperty::pid` 引用有效的材料组
-- 所有 Object 的 MeshView 非空（mesh 对象）
-- 顶点索引不越界 (v1/v2/v3 < vertices.size())
+- Document 至少有一个 Object 和 BuildItem，Core 集合数量均小于 2^31
+- Object 与材料组共享的 resource ID 全局唯一，且位于 `[1, 2^31)`
+- Mesh 同时具有 vertices/triangles，至少有 3 个顶点，坐标有限且索引不越界
+- `pid` / `pindex` 成对关系、材料组引用和索引范围有效；base material 的三角形属性不表达梯度
+- `triangle_properties` 为空，或与 triangle 数量一致且 Object 提供有效的默认 `pid` / `pindex`
+- Metadata 名称非空且同级唯一；带前缀的名称只使用已声明的非保留 namespace
+- BuildItem 和 Component 的 transform 数值均为有限值
 - Object 要么有 mesh 要么有 components（互斥，且至少有一个）
 - Component 引用有效的已定义 Object，且无循环引用（DFS 检测任意深度循环）
 - Thumbnail 数据非空，content_type 为 `image/png` 或 `image/jpeg`
+
+这里刻意不做闭合性、流形、绕序、自交或自动修复等拓扑分析。`Keep` 模式只拒绝重复顶点索引这一 Core 硬性非法情况，仍保留索引互异但面积为零的三角形；`FilterDegenerate` 才会过滤两类退化面，并在某个 mesh 被过滤为空时拒绝写出。
 
 ### 2.5 Production Extension 支持
 

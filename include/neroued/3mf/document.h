@@ -4,7 +4,7 @@
 #pragma once
 
 /// \file document.h
-/// \brief 3MF Document model -- lightweight, non-owning mesh references.
+/// \brief 3MF Document model with non-owning views and optional owned meshes.
 
 #include "materials.h"
 #include "types.h"
@@ -93,6 +93,13 @@ struct CustomContentType {
 };
 
 struct Document {
+    /// Move-only because Object::mesh may reference data in owned_meshes.
+    Document() = default;
+    Document(const Document &) = delete;
+    Document &operator=(const Document &) = delete;
+    Document(Document &&) noexcept = default;
+    Document &operator=(Document &&) noexcept = default;
+
     Unit unit = Unit::Millimeter;
     std::string language = "en-US";
     std::vector<Metadata> metadata;

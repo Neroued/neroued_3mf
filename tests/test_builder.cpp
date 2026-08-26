@@ -3,8 +3,40 @@
 #include "neroued/3mf/writer.h"
 
 #include <gtest/gtest.h>
+#include <limits>
+#include <type_traits>
+#include <utility>
 
 namespace n3mf = neroued_3mf;
+
+static_assert(!std::is_copy_constructible_v<n3mf::Document>);
+static_assert(!std::is_copy_assignable_v<n3mf::Document>);
+static_assert(std::is_nothrow_move_constructible_v<n3mf::Document>);
+static_assert(std::is_nothrow_move_assignable_v<n3mf::Document>);
+static_assert(!std::is_copy_constructible_v<n3mf::DocumentBuilder>);
+static_assert(!std::is_copy_assignable_v<n3mf::DocumentBuilder>);
+static_assert(std::is_nothrow_move_constructible_v<n3mf::DocumentBuilder>);
+static_assert(std::is_nothrow_move_assignable_v<n3mf::DocumentBuilder>);
+
+namespace {
+
+n3mf::Document MakeDocumentForValidation() {
+    n3mf::Document doc;
+    doc.owned_meshes.emplace_back();
+    auto &mesh = doc.owned_meshes.back();
+    mesh.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh.triangles = {{0, 1, 2}};
+
+    n3mf::Object object;
+    object.id = 1;
+    object.name = "Part";
+    object.mesh = mesh.View();
+    doc.objects.push_back(std::move(object));
+    doc.build_items.push_back({1});
+    return doc;
+}
+
+} // namespace
 
 TEST(DocumentBuilder, BasicBuild) {
     n3mf::Mesh mesh;
@@ -50,6 +82,24 @@ TEST(DocumentBuilder, OwnedMesh) {
     auto doc = builder.Build();
     EXPECT_EQ(doc.objects.size(), 1u);
     EXPECT_EQ(doc.objects[0].mesh.vertices.size(), 3u);
+}
+
+TEST(DocumentBuilder, MovePreservesOwnedMeshViews) {
+    n3mf::Mesh mesh;
+    mesh.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh.triangles = {{0, 1, 2}};
+
+    n3mf::DocumentBuilder source;
+    auto obj = source.AddMeshObject("Owned", std::move(mesh));
+    source.AddBuildItem(obj);
+
+    n3mf::DocumentBuilder moved(std::move(source));
+    auto doc = moved.Build();
+    const auto *vertices = doc.objects[0].mesh.vertices.data();
+
+    n3mf::Document moved_doc(std::move(doc));
+    EXPECT_EQ(moved_doc.objects[0].mesh.vertices.data(), vertices);
+    EXPECT_FLOAT_EQ(moved_doc.objects[0].mesh.vertices[1].x, 1.0f);
 }
 
 TEST(DocumentBuilder, AutoIncrementIds) {
@@ -559,4 +609,102 @@ TEST(DocumentBuilder, BuildItemUUID) {
 
     auto doc = builder.Build();
     EXPECT_EQ(doc.build_items[0].uuid, "item-uuid-1234");
+}
+
+TEST(DocumentValidation, RejectsDuplicateResourceIds) {
+    auto doc = MakeDocumentForValidation();
+    doc.base_material_groups.push_back({1, {{"Red", {255, 0, 0, 255}}}});
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsInvalidResourceIds) {
+    auto doc = MakeDocumentForValidation();
+    doc.objects[0].id = 0x80000000u;
+    doc.build_items[0].object_id = 0x80000000u;
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsPindexWithoutPid) {
+    auto doc = MakeDocumentForValidation();
+    doc.objects[0].pindex = 0;
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, TrianglePropertiesRequireObjectDefaults) {
+    auto doc = MakeDocumentForValidation();
+    doc.base_material_groups.push_back({2, {{"Red", {255, 0, 0, 255}}}});
+    doc.owned_meshes[0].triangle_properties = {{2, 0, 0, 0}};
+    doc.objects[0].mesh = doc.owned_meshes[0].View();
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsTrianglePropertyIndexOutOfRange) {
+    auto doc = MakeDocumentForValidation();
+    doc.base_material_groups.push_back({2, {{"Red", {255, 0, 0, 255}}}});
+    doc.owned_meshes[0].triangle_properties = {{2, 1, 1, 1}};
+    doc.objects[0].mesh = doc.owned_meshes[0].View();
+    doc.objects[0].pid = 2;
+    doc.objects[0].pindex = 0;
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsBaseMaterialGradient) {
+    auto doc = MakeDocumentForValidation();
+    doc.base_material_groups.push_back(
+        {2, {{"Red", {255, 0, 0, 255}}, {"Blue", {0, 0, 255, 255}}}});
+    doc.owned_meshes[0].triangle_properties = {{2, 0, 1, 0}};
+    doc.objects[0].mesh = doc.owned_meshes[0].View();
+    doc.objects[0].pid = 2;
+    doc.objects[0].pindex = 0;
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsDuplicateMetadataNames) {
+    auto doc = MakeDocumentForValidation();
+    doc.metadata = {{"Title", "First", ""}, {"Title", "Second", ""}};
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsUndeclaredMetadataPrefix) {
+    auto doc = MakeDocumentForValidation();
+    doc.metadata = {{"vendor:setting", "value", ""}};
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, AcceptsDeclaredMetadataPrefix) {
+    auto doc = MakeDocumentForValidation();
+    doc.custom_namespaces.push_back({"vendor", "https://example.com/vendor"});
+    doc.metadata = {{"vendor:setting", "value", ""}};
+
+    EXPECT_NO_THROW(n3mf::WriteToBuffer(doc));
+}
+
+TEST(DocumentValidation, RejectsNonFiniteVertex) {
+    auto doc = MakeDocumentForValidation();
+    doc.owned_meshes[0].vertices[1].x = std::numeric_limits<float>::quiet_NaN();
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsNonFiniteTransform) {
+    auto doc = MakeDocumentForValidation();
+    doc.build_items[0].transform.m[0] = std::numeric_limits<float>::infinity();
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
+}
+
+TEST(DocumentValidation, RejectsMeshWithFewerThanThreeVertices) {
+    auto doc = MakeDocumentForValidation();
+    doc.owned_meshes[0].vertices.resize(2);
+    doc.objects[0].mesh = doc.owned_meshes[0].View();
+
+    EXPECT_THROW(n3mf::WriteToBuffer(doc), n3mf::InputError);
 }

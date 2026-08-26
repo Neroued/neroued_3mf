@@ -141,6 +141,64 @@ TEST(Mesh, Append) {
     EXPECT_EQ(a.triangles[1].v3, 5u);
 }
 
+TEST(Mesh, AppendSelf) {
+    n3mf::Mesh mesh;
+    mesh.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    mesh.triangles = {{0, 1, 2}};
+
+    mesh.Append(mesh.View());
+
+    ASSERT_EQ(mesh.VertexCount(), 6u);
+    ASSERT_EQ(mesh.TriangleCount(), 2u);
+    EXPECT_EQ(mesh.triangles[1], (n3mf::IndexTriangle{3, 4, 5}));
+}
+
+TEST(Mesh, AppendPreservesCompatibleTriangleProperties) {
+    n3mf::Mesh a;
+    a.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    a.triangles = {{0, 1, 2}};
+    a.triangle_properties = {{1, 0, 0, 0}};
+
+    n3mf::Mesh b;
+    b.vertices = {{2, 0, 0}, {3, 0, 0}, {2, 1, 0}};
+    b.triangles = {{0, 1, 2}};
+    b.triangle_properties = {{1, 1, 1, 1}};
+
+    a.Append(b.View());
+
+    ASSERT_EQ(a.triangle_properties.size(), 2u);
+    EXPECT_EQ(a.triangle_properties[1], (n3mf::TriangleProperty{1, 1, 1, 1}));
+}
+
+TEST(Mesh, AppendIntoEmptyAdoptsTriangleProperties) {
+    n3mf::Mesh source;
+    source.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    source.triangles = {{0, 1, 2}};
+    source.triangle_properties = {{1, 0, 0, 0}};
+
+    n3mf::Mesh destination;
+    destination.Append(source.View());
+
+    EXPECT_EQ(destination.vertices, source.vertices);
+    EXPECT_EQ(destination.triangles, source.triangles);
+    EXPECT_EQ(destination.triangle_properties, source.triangle_properties);
+}
+
+TEST(Mesh, AppendRejectsIncompatibleTriangleProperties) {
+    n3mf::Mesh a;
+    a.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    a.triangles = {{0, 1, 2}};
+    a.triangle_properties = {{1, 0, 0, 0}};
+
+    n3mf::Mesh b;
+    b.vertices = {{2, 0, 0}, {3, 0, 0}, {2, 1, 0}};
+    b.triangles = {{0, 1, 2}};
+
+    EXPECT_THROW(a.Append(b.View()), n3mf::InputError);
+    EXPECT_EQ(a.VertexCount(), 3u);
+    EXPECT_EQ(a.TriangleCount(), 1u);
+}
+
 TEST(Mesh, ImplicitConversionToMeshView) {
     n3mf::Mesh m;
     m.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};

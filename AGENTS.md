@@ -92,8 +92,8 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | `fwd.h` | 全部公共类型的前向声明 |
 | `types.h` | `Vec3f`、`IndexTriangle`、`TriangleWriteMode`、`MeshView`、`Mesh`、`MeshAnalysis`、`Color`、`Transform` |
 | `materials.h` | `BaseMaterial`、`BaseMaterialGroup` |
-| `document.h` | `Document`、`Object`、`BuildItem`、`Component`、`Thumbnail`、`ObjectType`、`CustomPart`/`CustomRelationship` |
-| `builder.h` | `DocumentBuilder`（Builder 模式构建 Document） |
+| `document.h` | move-only `Document`、`Object`、`BuildItem`、`Component`、`Thumbnail`、`ObjectType`、`CustomPart`/`CustomRelationship` |
+| `builder.h` | move-only `DocumentBuilder`（Builder 模式构建 Document） |
 | `writer.h` | `WriteToBuffer`、`WriteToFile`、`WriteToStream`、`WriteOptions`、`WatermarkConfig` |
 | `watermark.h` | `WatermarkResult`、`DetectWatermark`、`HasL2Signature` |
 | `error.h` | `InputError`、`IOError`、`FormatError` |

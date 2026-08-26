@@ -20,6 +20,12 @@ namespace neroued_3mf {
 
 class DocumentBuilder {
   public:
+    DocumentBuilder() = default;
+    DocumentBuilder(const DocumentBuilder &) = delete;
+    DocumentBuilder &operator=(const DocumentBuilder &) = delete;
+    DocumentBuilder(DocumentBuilder &&) noexcept = default;
+    DocumentBuilder &operator=(DocumentBuilder &&) noexcept = default;
+
     DocumentBuilder &SetUnit(Unit unit);
     DocumentBuilder &SetLanguage(std::string lang);
     DocumentBuilder &AddMetadata(std::string name, std::string value, std::string type = "");

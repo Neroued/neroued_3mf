@@ -18,6 +18,8 @@ All public types reside in the `neroued_3mf` namespace. Include `<neroued/3mf/ne
 
 `Mesh` implicitly converts to `MeshView`, so all APIs accepting `MeshView` also accept `Mesh`.
 
+`Mesh::Append()` is safe for self-append and validates the source indices before changing the destination. When both meshes already contain triangles, they must either have one `TriangleProperty` per triangle or both have no per-triangle properties; mixing these layouts is rejected because the missing entries cannot be represented without inventing an invalid property resource ID. An empty destination adopts the source layout.
+
 ### Zero-copy Helpers
 
 Helper functions for constructing `MeshView` from layout-compatible external data without copying:
@@ -65,7 +67,7 @@ static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 
 | Type | Description |
 |------|-------------|
-| `Document` | Complete 3MF document model (unit, language, objects, build items, metadata, extensions) |
+| `Document` | Move-only 3MF document model (unit, language, objects, build items, metadata, extensions, optional owned meshes) |
 | `ObjectType` | Enum: `Model`, `SolidSupport`, `Support`, `Surface`, `Other` |
 | `Object` | Mesh or component object with type, partnumber, per-object metadata, uuid |
 | `Component` | Intra-model object reference with transform |
@@ -77,6 +79,8 @@ static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 | `CustomRelationship` | OPC relationship for vendor extensions |
 | `CustomContentType` | File extension to MIME type mapping |
 | `ProductionConfig` | Production Extension settings (enabled, merge, assembly transform, external metadata) |
+
+`Document` is move-only because an object's `MeshView` may point into the document's `owned_meshes`. Moving preserves those references; an implicit shallow copy would not provide an independent lifetime. Meshes added through the `MeshView` overload remain externally owned, so the caller must still keep those buffers alive through writing.
 
 ## Builder (`builder.h`)
 
@@ -134,7 +138,9 @@ static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 | `AddCustomRelationship(rel)` | Add OPC relationship |
 | `AddCustomContentType(ct)` | Register file extension content type |
 
-**Lifecycle**: After `Build()` is called, the builder is consumed. Any subsequent method call throws `InputError`.
+**Lifecycle**: `DocumentBuilder` is move-only. After `Build()` is called, the builder is consumed; any subsequent method call throws `InputError`.
+
+`Build()` and every `Write*` entry point validate the low-cost structural constraints needed for Core output: resource ID uniqueness/range, collection bounds, mesh completeness and finite coordinates, index and material references, metadata namespace use, finite transforms, component references/cycles, and thumbnail validity. This validation intentionally does not perform manifold, closed-volume, winding, or self-intersection analysis.
 
 ## Writer (`writer.h`)
 
@@ -154,8 +160,10 @@ static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 | `deterministic` | `bool` | `true` | Zero timestamps for reproducible output |
 | `compact_xml` | `bool` | `false` | Omit XML indentation (~15-20% smaller) |
 | `vertex_precision` | `int` | `9` | Significant digits for vertex coordinates (1-9). Transform matrices always use full precision |
-| `triangle_write_mode` | `TriangleWriteMode` | `Keep` | Keep all valid triangles, or skip index/area-degenerate triangles during XML output |
+| `triangle_write_mode` | `TriangleWriteMode` | `Keep` | Keep triangles with distinct indices (including zero-area geometry), or skip index/area-degenerate triangles during XML output |
 | `watermark` | `WatermarkConfig` | (disabled) | L1 triangle-rotation watermark configuration |
+
+`Keep` rejects a triangle that repeats a vertex index because Core output cannot represent it as a valid triangle. `FilterDegenerate` removes repeated-index and zero-area triangles and rejects an object if filtering leaves it with no triangles.
 
 ### WatermarkConfig
 

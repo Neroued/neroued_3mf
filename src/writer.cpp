@@ -113,6 +113,10 @@ BuildTriangleWritePlans(const Document &doc, const WriteOptions &opts,
 
         auto analysis = AnalyzeMesh(obj.mesh, TriangleWriteMode::FilterDegenerate);
         plan.written_triangle_count = analysis.written_triangle_count;
+        if (plan.written_triangle_count == 0) {
+            throw InputError("Object \"" + obj.name +
+                             "\" has no triangles remaining after degenerate filtering");
+        }
         if (analysis.degenerate_count == 0) { continue; }
 
         emit_masks.emplace_back(obj.mesh.triangles.size(), 0);
@@ -208,14 +212,14 @@ void ValidateZipOutput(const std::vector<uint8_t> &zip_bytes) {
     }
 }
 
-void ValidateDocumentPreWrite(const Document &doc) {
-    detail::ValidateDocument(doc);
+void ValidateDocumentPreWrite(const Document &doc, const WriteOptions &opts) {
+    detail::ValidateDocument(doc, opts.triangle_write_mode == TriangleWriteMode::Keep);
 }
 
 } // namespace
 
 std::vector<uint8_t> WriteToBuffer(const Document &doc, const WriteOptions &opts) {
-    ValidateDocumentPreWrite(doc);
+    ValidateDocumentPreWrite(doc, opts);
 
     std::vector<uint8_t> zip_bytes;
     zip_bytes.reserve(EstimateOutputSize(doc, opts));
@@ -227,7 +231,7 @@ std::vector<uint8_t> WriteToBuffer(const Document &doc, const WriteOptions &opts
 
 void WriteToFile(const std::filesystem::path &path, const Document &doc, const WriteOptions &opts) {
     if (path.empty()) { throw InputError("3MF output path is empty"); }
-    ValidateDocumentPreWrite(doc);
+    ValidateDocumentPreWrite(doc, opts);
 
     auto dir = path.parent_path();
     if (!dir.empty()) {
@@ -248,7 +252,7 @@ void WriteToFile(const std::filesystem::path &path, const Document &doc, const W
 }
 
 void WriteToStream(std::ostream &out, const Document &doc, const WriteOptions &opts) {
-    ValidateDocumentPreWrite(doc);
+    ValidateDocumentPreWrite(doc, opts);
 
     detail::StreamingZipWriter zip(out, opts);
     WriteAllEntries(zip, doc, opts);

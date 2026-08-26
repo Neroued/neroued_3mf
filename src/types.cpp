@@ -11,8 +11,25 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <functional>
+#include <limits>
 
 namespace neroued_3mf {
+
+namespace {
+
+template <typename T> bool SpansOverlap(std::span<const T> source, const std::vector<T> &target) {
+    if (source.empty() || target.empty()) { return false; }
+
+    const T *source_begin = source.data();
+    const T *source_end = source_begin + source.size();
+    const T *target_begin = target.data();
+    const T *target_end = target_begin + target.size();
+    auto less = std::less<const T *>{};
+    return less(source_begin, target_end) && less(target_begin, source_end);
+}
+
+} // namespace
 
 // -- Color ------------------------------------------------------------------
 
@@ -74,19 +91,68 @@ BBox Mesh::ComputeBoundingBox() const {
 }
 
 void Mesh::Append(const MeshView &other) {
-    if (other.vertices.empty()) { return; }
+    if (other.vertices.empty()) {
+        if (!other.triangles.empty() || !other.triangle_properties.empty()) {
+            throw InputError("Source mesh has triangles or properties but no vertices");
+        }
+        return;
+    }
+
+    const bool self_alias = SpansOverlap(other.vertices, vertices) ||
+                            SpansOverlap(other.triangles, triangles) ||
+                            SpansOverlap(other.triangle_properties, triangle_properties);
+    if (self_alias) {
+        Mesh snapshot;
+        snapshot.vertices.assign(other.vertices.begin(), other.vertices.end());
+        snapshot.triangles.assign(other.triangles.begin(), other.triangles.end());
+        snapshot.triangle_properties.assign(other.triangle_properties.begin(),
+                                            other.triangle_properties.end());
+        Append(snapshot.View());
+        return;
+    }
+
+    if (!triangle_properties.empty() && triangle_properties.size() != triangles.size()) {
+        throw InputError("Destination mesh triangle_properties size must match triangles size");
+    }
+    if (!other.triangle_properties.empty() &&
+        other.triangle_properties.size() != other.triangles.size()) {
+        throw InputError("Source mesh triangle_properties size must match triangles size");
+    }
+    if (!triangles.empty() && !other.triangles.empty() &&
+        triangle_properties.empty() != other.triangle_properties.empty()) {
+        throw InputError("Cannot append meshes with incompatible triangle property layouts");
+    }
+
+    constexpr std::size_t kMaxIndex = std::numeric_limits<uint32_t>::max();
+    if (vertices.size() > kMaxIndex || other.vertices.size() > kMaxIndex - vertices.size()) {
+        throw InputError("Appending mesh would exceed uint32 vertex index range");
+    }
 
     auto v_offset = static_cast<uint32_t>(vertices.size());
-    vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
+    for (const auto &tri : other.triangles) {
+        if (tri.v1 >= other.vertices.size() || tri.v2 >= other.vertices.size() ||
+            tri.v3 >= other.vertices.size()) {
+            throw InputError("Source mesh contains an out-of-range vertex index");
+        }
+        if (tri.v1 > std::numeric_limits<uint32_t>::max() - v_offset ||
+            tri.v2 > std::numeric_limits<uint32_t>::max() - v_offset ||
+            tri.v3 > std::numeric_limits<uint32_t>::max() - v_offset) {
+            throw InputError("Appending mesh would overflow a triangle vertex index");
+        }
+    }
 
-    std::size_t tri_start = triangles.size();
+    vertices.reserve(vertices.size() + other.vertices.size());
     triangles.reserve(triangles.size() + other.triangles.size());
+    if (!triangle_properties.empty() || !other.triangle_properties.empty()) {
+        triangle_properties.reserve(triangle_properties.size() + other.triangle_properties.size());
+    }
+
+    vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
     for (const auto &tri : other.triangles) {
         triangles.push_back({tri.v1 + v_offset, tri.v2 + v_offset, tri.v3 + v_offset});
     }
 
     if (!other.triangle_properties.empty()) {
-        if (triangle_properties.size() < tri_start) { triangle_properties.resize(tri_start, {}); }
         triangle_properties.insert(triangle_properties.end(), other.triangle_properties.begin(),
                                    other.triangle_properties.end());
     }
