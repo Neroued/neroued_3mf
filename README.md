@@ -9,7 +9,7 @@ Lightweight C++20 library for writing [3MF](https://3mf.io/specification/) files
 - **Vendor-neutral extensions** — inject arbitrary files, OPC relationships, and metadata without library changes
 - **Production Extension** — assembly models, external object files, merged mode, `p:UUID`
 - **No runtime dependencies** — C++20 standard library only (zlib optional for deflate compression)
-- **Python bindings** — `pip install neroued-3mf`, supports Python 3.10+ on all platforms
+- **Python bindings** — `pip install neroued-3mf`, supports Python 3.10+ on all platforms with an explicit NumPy zero-copy path
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ doc = builder.build()
 n3mf.write_to_file("output.3mf", doc)
 ```
 
-With NumPy arrays (e.g. from trimesh):
+With NumPy arrays (e.g. from trimesh), the convenience path accepts common dtypes and converts when needed:
 
 ```python
 import numpy as np
@@ -48,6 +48,24 @@ mesh = n3mf.Mesh.from_arrays(
     triangles=trimesh_mesh.faces,     # (M, 3) int64
 )
 ```
+
+For a guaranteed zero-copy write path, pass exact CPU buffers explicitly:
+
+```python
+import numpy as np
+import neroued_3mf as n3mf
+
+vertices = np.ascontiguousarray(vertices, dtype=np.float32)  # shape (N, 3)
+triangles = np.ascontiguousarray(triangles, dtype=np.uint32)  # or int32; shape (M, 3)
+
+builder = n3mf.DocumentBuilder()
+obj = builder.add_mesh_object_zero_copy("Part", vertices, triangles)
+builder.add_build_item(obj)
+doc = builder.build()
+n3mf.write_to_file("output.3mf", doc)
+```
+
+The arrays are retained by the resulting `Document`; the library treats them as read-only and reads their contents when writing. Do not resize or reallocate them until the document is no longer used.
 
 ### C++
 

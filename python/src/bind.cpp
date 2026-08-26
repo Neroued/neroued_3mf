@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 neroued
 
+#include <cstdint>
 #include <cstring>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -10,12 +11,79 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <neroued/3mf/neroued_3mf.h>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace nb = nanobind;
 using namespace nb::literals;
 namespace n3mf = neroued_3mf;
 
 namespace {
+
+using NumpyVertices =
+    nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>;
+
+template <typename Index>
+using NumpyTriangles =
+    nb::ndarray<const Index, nb::numpy, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>;
+
+template <typename Target, typename Array>
+void RequireZeroCopyAlignment(const Array &array, std::string_view label) {
+    auto address = reinterpret_cast<std::uintptr_t>(array.data());
+    if (address % alignof(Target) != 0) {
+        throw n3mf::InputError(std::string(label) +
+                               ": data pointer is not suitably aligned for zero-copy access");
+    }
+}
+
+template <typename Index>
+n3mf::MeshView NumpyMeshView(NumpyVertices vertices, NumpyTriangles<Index> triangles) {
+    static_assert(std::is_same_v<Index, uint32_t> || std::is_same_v<Index, int32_t>);
+    static_assert(sizeof(Index) == sizeof(uint32_t));
+
+    RequireZeroCopyAlignment<n3mf::Vec3f>(vertices, "vertices");
+    RequireZeroCopyAlignment<n3mf::IndexTriangle>(triangles, "triangles");
+
+    return {
+        n3mf::AsVertexSpan(static_cast<const float *>(vertices.data()), vertices.shape(0)),
+        {reinterpret_cast<const n3mf::IndexTriangle *>(triangles.data()), triangles.shape(0)},
+        {},
+    };
+}
+
+template <typename Index>
+uint32_t AddNumpyMeshObjectView(n3mf::DocumentBuilder &builder, std::string name,
+                                NumpyVertices vertices, NumpyTriangles<Index> triangles,
+                                std::optional<uint32_t> pid, std::optional<uint32_t> pindex) {
+    return builder.AddMeshObject(std::move(name), NumpyMeshView(vertices, triangles), pid, pindex);
+}
+
+template <typename Index>
+n3mf::MeshAnalysis AnalyzeNumpyMesh(NumpyVertices vertices, NumpyTriangles<Index> triangles,
+                                    n3mf::TriangleWriteMode mode) {
+    RequireZeroCopyAlignment<n3mf::Vec3f>(vertices, "vertices");
+    RequireZeroCopyAlignment<n3mf::IndexTriangle>(triangles, "triangles");
+
+    auto vertex_span =
+        n3mf::AsVertexSpan(static_cast<const float *>(vertices.data()), vertices.shape(0));
+    if constexpr (std::is_same_v<Index, uint32_t>) {
+        return n3mf::AnalyzeMesh(
+            {vertex_span,
+             n3mf::AsTriangleSpan(static_cast<const uint32_t *>(triangles.data()),
+                                  triangles.shape(0)),
+             {}},
+            mode);
+    } else {
+        return n3mf::AnalyzeSignedTriangleBuffer(
+            vertex_span,
+            n3mf::AsSignedIndexSpan(static_cast<const int32_t *>(triangles.data()),
+                                    triangles.shape(0)),
+            mode);
+    }
+}
 
 n3mf::Mesh MeshFromNumpy(nb::ndarray<nb::numpy> vert_in, nb::ndarray<nb::numpy> tri_in) {
     if (vert_in.ndim() != 2 || vert_in.shape(1) != 3)
@@ -102,6 +170,10 @@ NB_MODULE(_neroued_3mf, m) {
         .value("Support", n3mf::ObjectType::Support)
         .value("Surface", n3mf::ObjectType::Surface)
         .value("Other", n3mf::ObjectType::Other);
+
+    nb::enum_<n3mf::TriangleWriteMode>(m, "TriangleWriteMode")
+        .value("Keep", n3mf::TriangleWriteMode::Keep)
+        .value("FilterDegenerate", n3mf::TriangleWriteMode::FilterDegenerate);
 
     // ---- Vec3f -------------------------------------------------------------
 
@@ -217,6 +289,24 @@ NB_MODULE(_neroued_3mf, m) {
                    ", out_of_range=" + std::to_string(vr.out_of_range_count) + ")";
         });
 
+    // ---- MeshAnalysis ------------------------------------------------------
+
+    nb::class_<n3mf::MeshAnalysis>(m, "MeshAnalysis")
+        .def(nb::init<>())
+        .def_ro("bbox", &n3mf::MeshAnalysis::bbox)
+        .def_ro("source_triangle_count", &n3mf::MeshAnalysis::source_triangle_count)
+        .def_ro("written_triangle_count", &n3mf::MeshAnalysis::written_triangle_count)
+        .def_ro("degenerate_count", &n3mf::MeshAnalysis::degenerate_count)
+        .def_ro("out_of_range_count", &n3mf::MeshAnalysis::out_of_range_count)
+        .def("valid", &n3mf::MeshAnalysis::Valid)
+        .def("has_writable_triangles", &n3mf::MeshAnalysis::HasWritableTriangles)
+        .def("__repr__", [](const n3mf::MeshAnalysis &analysis) {
+            return "MeshAnalysis(source=" + std::to_string(analysis.source_triangle_count) +
+                   ", written=" + std::to_string(analysis.written_triangle_count) +
+                   ", degenerate=" + std::to_string(analysis.degenerate_count) +
+                   ", out_of_range=" + std::to_string(analysis.out_of_range_count) + ")";
+        });
+
     // ---- Mesh --------------------------------------------------------------
 
     nb::class_<n3mf::Mesh>(m, "Mesh")
@@ -245,6 +335,22 @@ NB_MODULE(_neroued_3mf, m) {
                 return MeshFromNumpy(vert_in, tri_in);
             },
             "vertices"_a, "triangles"_a);
+
+    m.def(
+        "analyze_mesh",
+        [](const n3mf::Mesh &mesh, n3mf::TriangleWriteMode mode) {
+            return n3mf::AnalyzeMesh(mesh.View(), mode);
+        },
+        "mesh"_a, "mode"_a = n3mf::TriangleWriteMode::Keep,
+        "Analyze an owning Mesh with the same triangle policy used by the writer.");
+
+    m.def("analyze_mesh", &AnalyzeNumpyMesh<uint32_t>, "vertices"_a.noconvert(),
+          "triangles"_a.noconvert(), "mode"_a = n3mf::TriangleWriteMode::Keep,
+          "Analyze C-contiguous float32 vertices and uint32 triangles without copying.");
+
+    m.def("analyze_mesh", &AnalyzeNumpyMesh<int32_t>, "vertices"_a.noconvert(),
+          "triangles"_a.noconvert(), "mode"_a = n3mf::TriangleWriteMode::Keep,
+          "Analyze C-contiguous float32 vertices and int32 triangles without copying.");
 
     // ---- BaseMaterial ------------------------------------------------------
 
@@ -516,6 +622,7 @@ NB_MODULE(_neroued_3mf, m) {
         .def_rw("deterministic", &n3mf::WriteOptions::deterministic)
         .def_rw("compact_xml", &n3mf::WriteOptions::compact_xml)
         .def_rw("vertex_precision", &n3mf::WriteOptions::vertex_precision)
+        .def_rw("triangle_write_mode", &n3mf::WriteOptions::triangle_write_mode)
         .def_prop_rw(
             "watermark",
             [](const n3mf::WriteOptions &o) -> n3mf::WatermarkConfig { return o.watermark; },
@@ -548,43 +655,27 @@ NB_MODULE(_neroued_3mf, m) {
             "name"_a, "mesh"_a, "pid"_a.none() = nb::none(), "pindex"_a.none() = nb::none())
 
         // Zero-copy: float32 vertices + uint32 triangles
-        .def(
-            "add_mesh_object",
-            [](n3mf::DocumentBuilder &self, std::string name,
-               nb::ndarray<const float, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu> vertices,
-               nb::ndarray<const uint32_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>
-                   triangles,
-               std::optional<uint32_t> pid, std::optional<uint32_t> pindex) -> uint32_t {
-                n3mf::MeshView view{
-                    n3mf::AsVertexSpan(static_cast<const float *>(vertices.data()),
-                                       vertices.shape(0)),
-                    n3mf::AsTriangleSpan(static_cast<const uint32_t *>(triangles.data()),
-                                         triangles.shape(0)),
-                    {}};
-                return self.AddMeshObject(std::move(name), view, pid, pindex);
-            },
-            "name"_a, "vertices"_a, "triangles"_a, "pid"_a.none() = nb::none(),
-            "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>())
+        .def("add_mesh_object", &AddNumpyMeshObjectView<uint32_t>, "name"_a,
+             "vertices"_a.noconvert(), "triangles"_a.noconvert(), "pid"_a.none() = nb::none(),
+             "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>())
 
         // Zero-copy: float32 vertices + int32 triangles (reinterpret)
-        .def(
-            "add_mesh_object",
-            [](n3mf::DocumentBuilder &self, std::string name,
-               nb::ndarray<const float, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu> vertices,
-               nb::ndarray<const int32_t, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>
-                   triangles,
-               std::optional<uint32_t> pid, std::optional<uint32_t> pindex) -> uint32_t {
-                static_assert(sizeof(int32_t) == sizeof(uint32_t));
-                n3mf::MeshView view{
-                    n3mf::AsVertexSpan(static_cast<const float *>(vertices.data()),
-                                       vertices.shape(0)),
-                    {reinterpret_cast<const n3mf::IndexTriangle *>(triangles.data()),
-                     triangles.shape(0)},
-                    {}};
-                return self.AddMeshObject(std::move(name), view, pid, pindex);
-            },
-            "name"_a, "vertices"_a, "triangles"_a, "pid"_a.none() = nb::none(),
-            "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>())
+        .def("add_mesh_object", &AddNumpyMeshObjectView<int32_t>, "name"_a,
+             "vertices"_a.noconvert(), "triangles"_a.noconvert(), "pid"_a.none() = nb::none(),
+             "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>())
+
+        // Strict zero-copy entry points: incompatible arrays are never converted.
+        .def("add_mesh_object_zero_copy", &AddNumpyMeshObjectView<uint32_t>, "name"_a,
+             "vertices"_a.noconvert(), "triangles"_a.noconvert(), "pid"_a.none() = nb::none(),
+             "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>(),
+             "Add a mesh backed directly by C-contiguous float32/uint32 NumPy arrays. "
+             "Incompatible arrays are rejected instead of converted.")
+
+        .def("add_mesh_object_zero_copy", &AddNumpyMeshObjectView<int32_t>, "name"_a,
+             "vertices"_a.noconvert(), "triangles"_a.noconvert(), "pid"_a.none() = nb::none(),
+             "pindex"_a.none() = nb::none(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>(),
+             "Add a mesh backed directly by C-contiguous float32/int32 NumPy arrays. "
+             "Incompatible arrays are rejected instead of converted.")
 
         // Conversion: all other dtype combinations (float64, int64, etc.)
         .def(

@@ -36,7 +36,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 - `tools/`：CLI 工具（`n3mf_detect` 水印检测、`n3mf_generate_test` 测试文件生成）
 - `tests/`：单元测试（GoogleTest）
 - `python/`：Python 绑定（nanobind + scikit-build-core）
-  - `python/src/bind.cpp`：nanobind 绑定源码
+  - `python/src/bind.cpp`：nanobind 绑定源码（含 NumPy 自动/严格零拷贝入口与 mesh analysis）
   - `python/neroued_3mf/`：Python 包（`__init__.py`、`py.typed`）
   - `python/tests/`：Python 测试（pytest）
   - `python/CMakeLists.txt`：Python 扩展模块构建
@@ -74,6 +74,7 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 | 更新用法示例文档 | `docs/EXAMPLES.md` |
 | 更新设计文档 | `docs/DESIGN.md` |
 | 修改 Python 绑定 | `python/src/bind.cpp`、`python/CMakeLists.txt`、`pyproject.toml` |
+| 修改 Python NumPy 零拷贝接口 | `python/src/bind.cpp`、`python/neroued_3mf/__init__.py`、`python/tests/test_basic.py`、`docs/API.md`、`docs/EXAMPLES.md` |
 | 新增 Python 绑定类型 | `python/src/bind.cpp`（添加绑定）、`python/neroued_3mf/__init__.py`（重导出） |
 | 修改 Python 测试 | `python/tests/test_basic.py` |
 | 修改 CI 流水线 | `.github/workflows/ci.yml`、`.github/workflows/wheels.yml` |

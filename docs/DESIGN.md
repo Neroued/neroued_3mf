@@ -62,6 +62,19 @@ neroued_3mf 从 [ChromaPrint3D](https://github.com/neroued/ChromaPrint3D) 的 3M
 
 这样做的核心原因是：负索引和越界索引属于**输入合法性问题**，而不是 `MeshView` 自身的语义问题。调用方先分析、再决定是否把同一块外部缓冲以 `MeshView` 形式交给 writer，就可以在保持 API 稳定的前提下实现零拷贝桥接。
 
+### 2.1.2 Python NumPy 的显式零拷贝契约
+
+Python 绑定不引入新的网格所有权模型，而是把满足布局要求的 NumPy CPU 数组直接映射为现有 `MeshView`：顶点必须是 C-contiguous `(N, 3)` `float32`，三角形必须是 C-contiguous `(M, 3)` `uint32` 或 `int32`，并满足底层 C++ 类型的对齐要求。NumPy/nanobind 依赖仍完全隔离在 `python/`，核心 C++ 库不感知 Python。
+
+绑定提供两个入口，职责有意分开：
+
+- `add_mesh_object()` 是兼容入口；布局匹配时零拷贝，否则沿用已有的单次转换路径
+- `add_mesh_object_zero_copy()` 是性能契约入口；通过 nanobind 的 no-convert 参数约束拒绝任何需要 dtype、shape 或连续性转换的输入
+
+两者最终仍调用同一个 `DocumentBuilder::AddMeshObject(MeshView)`，没有复制 writer、validation 或 Document 逻辑。`analyze_mesh()`、`MeshAnalysis`、`TriangleWriteMode` 和 `WriteOptions.triangle_write_mode` 同步暴露给 Python，使有符号索引预检和退化面过滤与 C++ 使用同一套语义。
+
+零拷贝数组通过 `DocumentBuilder → Document` 的 Python 引用链保活；`Document` 销毁后引用才释放。这只解决对象生命周期，不固定缓冲地址：调用方在 Document 仍可写出期间不得 resize/reallocate 数组，也不得与 writer 并发修改数组。数组内容在写出时读取，因此写出前的原位修改会反映到结果中。
+
 ### 2.2 Document-first 流式写入（方式 A）
 
 写入流程分两步：

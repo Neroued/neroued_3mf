@@ -3,7 +3,11 @@
 
 """Basic functional tests for the neroued_3mf Python bindings."""
 
+import gc
+import io
 import tempfile
+import weakref
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -35,6 +39,12 @@ def make_simple_document():
     obj_id = builder.add_mesh_object("Part1", make_triangle_mesh())
     builder.add_build_item(obj_id)
     return builder.build()
+
+
+def read_model_xml(doc, opts=None):
+    data = n3mf.write_to_buffer(doc, opts) if opts is not None else n3mf.write_to_buffer(doc)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return archive.read("3D/3dmodel.model").decode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +132,12 @@ class TestMesh:
         result = mesh.validate()
         assert result.valid()
         assert result.degenerate_count == 0
+
+    def test_analyze(self):
+        result = n3mf.analyze_mesh(make_triangle_mesh())
+        assert result.valid()
+        assert result.source_triangle_count == 1
+        assert result.written_triangle_count == 1
 
     def test_append(self):
         m1 = make_triangle_mesh()
@@ -257,6 +273,7 @@ class TestWriteOptions:
         assert opts.deterministic is True
         assert opts.compact_xml is False
         assert opts.vertex_precision == 9
+        assert opts.triangle_write_mode == n3mf.TriangleWriteMode.Keep
 
     def test_watermark_config_on_write_options(self):
         opts = n3mf.WriteOptions()
@@ -503,6 +520,119 @@ class TestAddMeshObjectNumpy:
         buf = n3mf.write_to_buffer(doc)
         assert buf[:2] == b"PK"
         assert len(buf) > 100
+
+
+# ---------------------------------------------------------------------------
+# Explicit NumPy zero-copy API
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
+class TestAddMeshObjectZeroCopy:
+    @pytest.mark.parametrize("triangle_dtype", ["uint32", "int32"])
+    def test_observes_buffer_mutations(self, triangle_dtype):
+        """Writing reads the original arrays instead of an internal copy."""
+        verts = np.array([[0, 0, 0], [10, 0, 0], [0, 10, 0]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=triangle_dtype)
+
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object_zero_copy("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+
+        verts[1, 0] = 42
+        tris[0] = [1, 2, 0]
+        xml = read_model_xml(doc)
+        assert '<vertex x="42" y="0" z="0"/>' in xml
+        assert '<triangle v1="1" v2="2" v3="0"/>' in xml
+
+    def test_accepts_read_only_arrays(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        verts.flags.writeable = False
+        tris.flags.writeable = False
+
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object_zero_copy("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        assert n3mf.write_to_buffer(builder.build())[:2] == b"PK"
+
+    @pytest.mark.parametrize(
+        ("vertex_dtype", "triangle_dtype", "noncontiguous"),
+        [
+            ("float64", "uint32", False),
+            ("float32", "int64", False),
+            ("float32", "uint32", True),
+        ],
+    )
+    def test_rejects_inputs_that_would_require_conversion(
+        self, vertex_dtype, triangle_dtype, noncontiguous
+    ):
+        vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=vertex_dtype)
+        if noncontiguous:
+            vertices = np.zeros((3, 6), dtype=vertex_dtype)[:, ::2]
+        triangles = np.array([[0, 1, 2]], dtype=triangle_dtype)
+        builder = n3mf.DocumentBuilder()
+        with pytest.raises(TypeError):
+            builder.add_mesh_object_zero_copy("Part", vertices, triangles)
+
+    def test_rejects_unaligned_arrays(self):
+        storage = bytearray(1 + 3 * 3 * np.dtype(np.float32).itemsize)
+        verts = np.ndarray((3, 3), dtype=np.float32, buffer=storage, offset=1)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+
+        builder = n3mf.DocumentBuilder()
+        with pytest.raises(n3mf.InputError, match="aligned"):
+            builder.add_mesh_object_zero_copy("Part", verts, tris)
+
+    def test_document_owns_array_references(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        tris = np.array([[0, 1, 2]], dtype=np.uint32)
+        vertices_ref = weakref.ref(verts)
+        triangles_ref = weakref.ref(tris)
+
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object_zero_copy("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        doc = builder.build()
+        del verts, tris, builder
+        gc.collect()
+
+        assert vertices_ref() is not None
+        assert triangles_ref() is not None
+        assert n3mf.write_to_buffer(doc)[:2] == b"PK"
+
+        del doc
+        gc.collect()
+        assert vertices_ref() is None
+        assert triangles_ref() is None
+
+    def test_analysis_and_filtering_share_writer_policy(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        tris = np.array([[0, 0, 1], [0, 1, 2]], dtype=np.int32)
+
+        analysis = n3mf.analyze_mesh(verts, tris, n3mf.TriangleWriteMode.FilterDegenerate)
+        assert analysis.valid()
+        assert analysis.has_writable_triangles()
+        assert analysis.source_triangle_count == 2
+        assert analysis.written_triangle_count == 1
+        assert analysis.degenerate_count == 1
+        assert analysis.out_of_range_count == 0
+
+        builder = n3mf.DocumentBuilder()
+        obj_id = builder.add_mesh_object_zero_copy("Part", verts, tris)
+        builder.add_build_item(obj_id)
+        opts = n3mf.WriteOptions()
+        opts.triangle_write_mode = n3mf.TriangleWriteMode.FilterDegenerate
+        assert read_model_xml(builder.build(), opts).count("<triangle ") == 1
+
+    def test_signed_analysis_reports_negative_indices(self):
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        tris = np.array([[-1, 1, 2]], dtype=np.int32)
+
+        analysis = n3mf.analyze_mesh(verts, tris)
+        assert not analysis.valid()
+        assert not analysis.has_writable_triangles()
+        assert analysis.out_of_range_count == 1
 
 
 # ---------------------------------------------------------------------------

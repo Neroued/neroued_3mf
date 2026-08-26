@@ -207,29 +207,48 @@ All watermark types and functions are available in Python. `vector<uint8_t>` fie
 | `HasL2Signature(data)` | `has_l2_signature(data: bytes) -> bool` |
 | `WriteOptions.watermark` | `WatermarkConfig` (read-write) |
 
-## Python `add_mesh_object` NumPy Overloads
+## Python NumPy Mesh APIs
 
-In addition to accepting a `Mesh` object, `DocumentBuilder.add_mesh_object()` accepts NumPy arrays directly. nanobind selects the best overload based on array dtypes:
+The Python binding provides separate convenience and strict-performance paths:
+
+| API | Ownership / conversion behavior |
+|-----|---------------------------------|
+| `Mesh.from_arrays(vertices, triangles)` | Always creates an owning `Mesh` and copies/converts the arrays |
+| `builder.add_mesh_object(name, vertices, triangles, ...)` | Automatically uses zero-copy for compatible arrays and otherwise copies/converts |
+| `builder.add_mesh_object_zero_copy(name, vertices, triangles, ...)` | Requires an exact zero-copy layout and never performs an implicit conversion |
+| `analyze_mesh(vertices, triangles, mode=TriangleWriteMode.Keep)` | Analyzes an exact zero-copy layout without constructing an owning `Mesh` |
+
+`add_mesh_object_zero_copy()` and the NumPy overloads of `analyze_mesh()` require:
+
+- CPU NumPy arrays with shapes `(N, 3)` and `(M, 3)`
+- C-contiguous, suitably aligned storage
+- `float32` vertices
+- `uint32` or `int32` triangle indices
+
+Read-only arrays are accepted because the library never writes to mesh buffers. A dtype, shape, device, or contiguity mismatch raises `TypeError`; an incompatible pointer alignment raises `InputError`. No temporary conversion is used to make an input fit this API.
+
+The automatic `add_mesh_object()` overload retains the existing compatibility behavior:
 
 | Vertex dtype | Triangle dtype | Path | Typical source |
 |-------------|---------------|------|----------------|
-| float32 | uint32 | **Zero-copy** | Custom / GPU data |
-| float32 | int32 | **Zero-copy** (reinterpret) | Open3D tensor API |
+| float32 | uint32 | **Zero-copy** | Native 3MF-style CPU buffer |
+| float32 | int32 | **Zero-copy** (same 32-bit representation) | Open3D tensor API |
 | float64 | int32 | Fast conversion | Open3D legacy, pymeshlab |
 | float64 | int64 | Fast conversion | trimesh, PyVista, meshio |
 | float64 | uint32 | Fast conversion | — |
 | float32 | int64 | Fast conversion | — |
 
-**Lifetime management**: Zero-copy overloads use `keep_alive` to ensure NumPy arrays are not garbage-collected while referenced by `DocumentBuilder` → `Document`. Conversion overloads copy data into the builder, so arrays can be freed immediately.
-
 ```python
 builder = n3mf.DocumentBuilder()
 
-# Same method, different input types:
-obj1 = builder.add_mesh_object("Part1", mesh)                     # Mesh object
-obj2 = builder.add_mesh_object("Part2", verts_f32, tris_u32)      # zero-copy
-obj3 = builder.add_mesh_object("Part3", verts_f64, tris_i64)      # conversion
+obj1 = builder.add_mesh_object("Owned", mesh)
+obj2 = builder.add_mesh_object("Automatic", verts_f64, tris_i64)
+obj3 = builder.add_mesh_object_zero_copy("Strict", verts_f32, tris_u32)
 ```
+
+**Lifetime and mutation contract**: the zero-copy arrays are kept alive through `DocumentBuilder` and the resulting `Document`. Their current contents are read during every `write_to_*()` call, so content changes made before a write are observable. Do not resize, reshape in place, reallocate, or concurrently mutate either array while the document may be written. References are released when the builder/document lifetime ends. Conversion paths own an independent copy and do not retain the source arrays.
+
+`int32` buffers are not scanned by `add_mesh_object_zero_copy()` itself. Normal `build()` / writer validation still rejects negative and out-of-range indices. Use `analyze_mesh()` when the caller needs the bbox, source/written triangle counts, degenerate count, or an explicit preflight result. `TriangleWriteMode` and `WriteOptions.triangle_write_mode` are both exposed in Python, so analysis and writer-side degenerate filtering use the same policy.
 
 ## Error Types (`error.h`)
 

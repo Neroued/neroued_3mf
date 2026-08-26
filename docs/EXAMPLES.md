@@ -207,30 +207,53 @@ neroued_3mf::WriteToFile("bambu_project.3mf", doc);
 
 ## Python: NumPy Array Input
 
-`add_mesh_object()` accepts NumPy arrays directly as an alternative to a `Mesh` object. When dtypes match the internal format (float32 + uint32/int32), data is referenced **zero-copy**; otherwise an efficient single-step conversion is performed.
+`add_mesh_object()` is the convenience API: it accepts common NumPy dtypes, uses zero-copy when the layout already matches, and otherwise performs a single conversion. Use `add_mesh_object_zero_copy()` when falling back to a copy would violate the caller's performance contract.
 
 ```python
 import numpy as np
 import neroued_3mf as n3mf
+import trimesh
 
 builder = n3mf.DocumentBuilder()
 builder.set_unit(n3mf.Unit.Millimeter)
 
-# Approach 1: Pass NumPy arrays directly (recommended for most workflows)
-# trimesh example (float64 + int64 → fast internal conversion)
-import trimesh
+# Convenience path: typical trimesh float64 + int64 arrays are converted.
 tm = trimesh.load("model.stl")
 obj = builder.add_mesh_object("Part", tm.vertices, tm.faces)
 builder.add_build_item(obj)
 
-# High-perf workflow (float32 + uint32 → true zero-copy, no data copy at all)
+# Strict path: exact CPU buffers are referenced directly or the call fails.
 verts = np.array([[0, 0, 0], [10, 0, 0], [5, 10, 5]], dtype=np.float32)
 tris = np.array([[0, 1, 2]], dtype=np.uint32)
-obj2 = builder.add_mesh_object("Part2", verts, tris)
+obj2 = builder.add_mesh_object_zero_copy("Part2", verts, tris)
 builder.add_build_item(obj2)
 
 doc = builder.build()
 n3mf.write_to_file("output.3mf", doc)
+```
+
+The strict path requires C-contiguous `(N, 3)` `float32` vertices and C-contiguous `(M, 3)` `uint32` or `int32` triangles. Read-only arrays are valid. The document retains both arrays, but they must not be resized, reallocated, or concurrently mutated while a write can occur.
+
+Analyze the same buffers before registering them when signed indices or degenerate filtering need an explicit decision:
+
+```python
+analysis = n3mf.analyze_mesh(
+    verts,
+    tris,
+    n3mf.TriangleWriteMode.FilterDegenerate,
+)
+if not analysis.valid():
+    raise ValueError(f"{analysis.out_of_range_count} invalid triangle indices")
+if not analysis.has_writable_triangles():
+    raise ValueError("all triangles are degenerate")
+
+builder = n3mf.DocumentBuilder()
+obj = builder.add_mesh_object_zero_copy("Part", verts, tris)
+builder.add_build_item(obj)
+
+opts = n3mf.WriteOptions()
+opts.triangle_write_mode = n3mf.TriangleWriteMode.FilterDegenerate
+n3mf.write_to_file("filtered.3mf", builder.build(), opts)
 ```
 
 `Mesh.from_arrays()` is still available for creating standalone `Mesh` objects when you need to inspect, validate, or manipulate the mesh before adding it:

@@ -224,7 +224,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pip install pytest
+          pip install pytest numpy
           pytest python/tests -v
         env:
           N3MF_DLL_DIR: ${{ runner.os == 'Windows' && format('{0}/installed/{1}/bin', env.WIN_VCPKG_ROOT, env.WIN_VCPKG_TRIPLET) || '' }}
