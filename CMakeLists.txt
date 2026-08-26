@@ -14,7 +14,7 @@ if(GIT_FOUND)
     endif()
 endif()
 if(NOT N3MF_VERSION)
-    set(N3MF_VERSION "0.1.0")
+    set(N3MF_VERSION "0.4.0")
 endif()
 
 project(neroued_3mf VERSION ${N3MF_VERSION} LANGUAGES CXX)

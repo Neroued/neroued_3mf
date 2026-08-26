@@ -387,7 +387,7 @@ target_link_libraries(my_app PRIVATE neroued::3mf)
 include(FetchContent)
 FetchContent_Declare(neroued_3mf
     GIT_REPOSITORY https://github.com/neroued/neroued_3mf.git
-    GIT_TAG v0.1.0)
+    GIT_TAG v0.4.0)
 set(N3MF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(neroued_3mf)
 target_link_libraries(my_app PRIVATE neroued::3mf)
@@ -416,9 +416,9 @@ target_link_libraries(my_app PRIVATE neroued::3mf)
 
 ```cpp
 NEROUED_3MF_VERSION_MAJOR   // e.g. 0
-NEROUED_3MF_VERSION_MINOR   // e.g. 1
+NEROUED_3MF_VERSION_MINOR   // e.g. 4
 NEROUED_3MF_VERSION_PATCH   // e.g. 0
-NEROUED_3MF_VERSION_STRING  // e.g. "0.1.0"
+NEROUED_3MF_VERSION_STRING  // e.g. "0.4.0"
 ```
 
 ---

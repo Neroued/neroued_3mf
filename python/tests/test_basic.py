@@ -8,6 +8,7 @@ import io
 import tempfile
 import weakref
 import zipfile
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,10 @@ def read_model_xml(doc, opts=None):
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
+
+def test_version_matches_distribution_metadata():
+    assert n3mf.__version__ == distribution_version("neroued-3mf")
+
 
 class TestVec3f:
     def test_construction(self):

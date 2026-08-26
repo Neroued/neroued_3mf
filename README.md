@@ -106,7 +106,7 @@ pip install neroued-3mf
 include(FetchContent)
 FetchContent_Declare(neroued_3mf
     GIT_REPOSITORY https://github.com/neroued/neroued_3mf.git
-    GIT_TAG v0.1.0)
+    GIT_TAG v0.4.0)
 set(N3MF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(neroued_3mf)
 target_link_libraries(your_target PRIVATE neroued::3mf)
