@@ -165,8 +165,10 @@ static_assert(alignof(IndexTriangle) == alignof(uint32_t));
 | Function | Description |
 |----------|-------------|
 | `WriteToBuffer(doc, opts)` | Serialize to `std::vector<uint8_t>` |
-| `WriteToFile(path, doc, opts)` | Atomic write to file (temp file + rename). `path` is `std::filesystem::path` |
+| `WriteToFile(path, doc, opts)` | Atomic write to file (temp file + rename). `path` is `std::filesystem::path`; Windows Unicode and long paths are handled at the file I/O boundary without requiring the caller's long-path manifest |
 | `WriteToStream(out, doc, opts)` | Write to `std::ostream` |
+
+Windows path handling does not remove filesystem limits on individual filename components.
 
 ### WriteOptions
 

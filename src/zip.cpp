@@ -5,6 +5,8 @@
 
 #include "neroued/3mf/error.h"
 
+#include "internal/filesystem_path.h"
+
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -241,10 +243,11 @@ struct StreamingZipWriter::Impl {
     }
 
     Impl(const std::filesystem::path &path, WriteOptions opts)
-        : sink_kind(SinkKind::File), file_sink(path, std::ios::binary | std::ios::trunc),
+        : sink_kind(SinkKind::File),
+          file_sink(FileIoPath(path), std::ios::binary | std::ios::trunc),
           options(std::move(opts)) {
         if (!file_sink.is_open()) {
-            throw IOError("Cannot open file for writing: " + path.string());
+            throw IOError("Cannot open file for writing: " + PathText(path));
         }
         auto [t, d] = MakeDosTimestamp(options.deterministic);
         dos_time = t;

@@ -5,6 +5,7 @@
 
 #include "neroued/3mf/error.h"
 
+#include "internal/filesystem_path.h"
 #include "internal/mesh_analysis.h"
 #include "internal/validate.h"
 #include "internal/watermark.h"
@@ -38,14 +39,13 @@ std::string RandomHex(std::size_t byte_count) {
 }
 
 std::filesystem::path MakeAtomicTempPath(const std::filesystem::path &final_path) {
-    auto dir = final_path.parent_path();
-    auto base = final_path.filename().string();
     for (int attempt = 0; attempt < 16; ++attempt) {
-        auto candidate = dir / (base + ".tmp-" + RandomHex(8));
+        auto candidate = final_path;
+        candidate += ".tmp-" + RandomHex(8);
         std::error_code ec;
         if (!std::filesystem::exists(candidate, ec) && !ec) { return candidate; }
     }
-    throw IOError("Failed to allocate temporary output path for " + final_path.string());
+    throw IOError("Failed to allocate temporary output path for " + detail::PathText(final_path));
 }
 
 class PendingAtomicFile {
@@ -64,15 +64,15 @@ class PendingAtomicFile {
         if (std::filesystem::exists(final_path, ec) && !ec) {
             std::filesystem::remove(final_path, ec);
             if (ec) {
-                throw IOError("Failed to replace existing file " + final_path.string() + ": " +
-                              ec.message());
+                throw IOError("Failed to replace existing file " + detail::PathText(final_path) +
+                              ": " + ec.message());
             }
         }
 #endif
         std::filesystem::rename(path_, final_path, ec);
         if (ec) {
-            throw IOError("Failed to move temp file into place for " + final_path.string() + ": " +
-                          ec.message());
+            throw IOError("Failed to move temp file into place for " +
+                          detail::PathText(final_path) + ": " + ec.message());
         }
         path_.clear();
     }
@@ -298,22 +298,23 @@ void WriteToFile(const std::filesystem::path &path, const Document &doc, const W
     if (path.empty()) { throw InputError("3MF output path is empty"); }
     ValidateDocumentPreWrite(doc, opts);
 
-    auto dir = path.parent_path();
+    const auto output_path = detail::FileIoPath(path);
+    auto dir = output_path.parent_path();
     if (!dir.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
         if (ec) {
-            throw IOError("Failed to create output directory " + dir.string() + ": " +
+            throw IOError("Failed to create output directory " + detail::PathText(dir) + ": " +
                           ec.message());
         }
     }
 
-    PendingAtomicFile pending(MakeAtomicTempPath(path));
+    PendingAtomicFile pending(MakeAtomicTempPath(output_path));
     {
         detail::StreamingZipWriter zip(pending.path(), opts);
         WriteAllEntries(zip, doc, opts);
     }
-    pending.CommitTo(path);
+    pending.CommitTo(output_path);
 }
 
 void WriteToStream(std::ostream &out, const Document &doc, const WriteOptions &opts) {

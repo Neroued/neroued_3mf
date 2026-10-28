@@ -32,9 +32,9 @@ DocumentBuilder ──▶ Document ──▶ WriteToBuffer / WriteToFile / Write
 
 - `include/neroued/3mf/`：公共 API 头文件
 - `src/`：库实现（builder、writer、opc、zip）
-- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、mesh_analysis、omp_config、sha256、watermark、zip_read）
+- `src/internal/`：内部工具（xml_util、xml_stream_buffer、opc_types、validate、mesh_analysis、filesystem_path、omp_config、sha256、watermark、zip_read）
 - `tools/`：CLI 工具（`n3mf_detect` 水印检测、`n3mf_generate_test` 测试文件生成）
-- `tests/`：单元测试（GoogleTest）
+- `tests/`：单元测试（GoogleTest）；`test_file_paths.cpp` 验证文件输出路径，MSVC 测试使用 `no_long_path.manifest` 显式关闭长路径感知
 - `python/`：Python 绑定（nanobind + scikit-build-core）
   - `python/src/bind.cpp`：nanobind 绑定源码（含 NumPy 自动/严格零拷贝入口与 mesh analysis）
   - `python/neroued_3mf/`：Python 包（`__init__.py`、`py.typed`）
